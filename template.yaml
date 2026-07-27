@@ -1,0 +1,226 @@
+# ==============================================================
+# palm_preproc configuration - FULL REFERENCE
+# ==============================================================
+# This file documents every setting and is self-sufficient (copy it as-is
+# and it works). In practice you rarely need to: defaults/default.yaml
+# is applied automatically to every project BEFORE its own config, so a new
+# project config only needs to state what's actually project-specific - see
+# config/example_minimal.yaml for what that looks like in practice, and
+# defaults/default.yaml for the site-wide baseline these values
+# inherit from (edit that file to change the baseline for every new
+# project).
+#
+# Template: copy to config/<project>.yaml and edit.
+# Run:  python run_preproc.py -c config/<project>.yaml
+# Relative paths resolve against project.root (default: this file's directory).
+# ==============================================================
+
+project:
+  name: project_name
+  # Base directory for all relative paths below. Default (null) = the
+  # directory of this YAML file; since project configs live in config/,
+  # point root at the project directory instead:
+  root: /path/to/palm/DATA
+  output_dir: ./project_name          # domain_*.shp + DATA_child/ + DATA_parent/ go here
+                                      # (relative to project.root)
+  state_file: null                    # null -> <output_dir>/palm_preproc_state.json
+  overwrite: false                    # true: regenerate ALL outputs - resume state
+                                      # ignored, templates and aux files replaced
+                                      # (import_process.log included; use with care)
+
+crs:
+  aligned: "EPSG:32633"               # working CRS; ALL data outputs are in this CRS
+  domain_output: null                 # optional different CRS for domain_*.shp only
+                                      # (e.g. "EPSG:5514"); data layers always stay
+                                      # in crs.aligned because they must match the
+                                      # PALM grid
+
+# The user's own (child-domain) data - same interface as raw_data below.
+# A layer participates when its file exists; set a layer to false to ignore
+# an existing file, or to a path to use a file elsewhere. Layers found here
+# are merged over the clipped raw layer with user priority inside the
+# domain.shp footprint. domain is REQUIRED.
+user_data:
+  dir: ./project_name/DATA_project_name   # relative to project.root
+  # Area of interest: either an explicit domain.shp, or - with domain: null -
+  # derive it from the full extent of one of the layers below via
+  # domain_from (e.g. landcover). An explicit domain always wins.
+  domain: domain.shp                  # filename in dir, a path, or null
+  domain_from: null                   # e.g. landcover (used only when domain is null)
+  layers:
+    landcover: landcover.shp
+    roofs:     roofs.shp
+    walls:     walls.shp
+    trees:     trees.shp
+    # buildings.tif may also be user-supplied: inside the domain footprint
+    # the user heights fully replace raw (raw fills only outside). dem is
+    # always taken from raw_data.
+    # buildings: buildings.tif
+
+# The whole-city source data - only ever read, never modified.
+raw_data:
+  dir: ./DATA_raw
+  layers:
+    dem:       dem.tif
+    buildings: buildings.tif
+    landcover: landcover.shp
+    roofs:     roofs.shp
+    walls:     walls.shp
+    trees:     trees.shp
+  # Auxiliary files placed into DATA_child and DATA_parent (never
+  # overwritten on reruns unless project.overwrite): "copy" takes the file
+  # from raw_data.dir, "create_empty" (alias "touch") creates an empty file.
+  aux_files:
+    surface_params.csv: copy
+    import_process.log: create_empty
+
+domains:
+  child:
+    grid_size: 1.0                    # metres per grid point
+    buffer: 0.0                       # no buffer for the child domain
+    min_power: 3                      # dims divisible by 2^3 = 8 (multigrid)
+    optimize_topology: false          # topology-aware sizing for the child
+    confirm_optimized: true           # ask before accepting an optimization-grown
+                                      # child (interactive sessions only)
+  parent:
+    grid_size: 2.0
+    buffer: 400.0                     # metres each side around the FINAL (possibly
+                                      # optimized) CHILD rectangle
+    min_power: 3
+    optimize_topology: true           # topology-aware sizing (procesor_topology rules)
+    topology_max_overhead: 0.10       # allow +10% per axis while searching
+    topology_opt: true                # cells/core divisible by 4
+  align_child_to_parent: true         # child origin + extent on the parent grid
+                                      # (requires integer parent/child grid ratio)
+  strict_nesting: true                # ABORT if the child is off the parent
+                                      # lattice (sub-grid displacement of the
+                                      # static driver); false = warn only
+
+clip:
+  snap_rasters_to_grid: true          # resample rasters onto the exact PALM grid
+  buildings_mask_layer: roofs         # clip buildings.tif to the FINAL roofs.shp
+                                      # of each domain (null disables)
+  buildings_nodata: -9999.0           # nodata forced on the buildings raster
+  resampling:
+    dem: bilinear
+    buildings: nearest
+    default: nearest
+  workers: 4
+
+merge:
+  mode: difference                    # "difference": cut raw geometry along the
+                                      #   domain.shp boundary (no gaps/overlaps)
+                                      # "predicate": whole features, original
+                                      #   merge.py behaviour
+  predicate: within                   # used only in mode: predicate
+  # In difference mode (default) raw is always cut exactly along the user
+  # coverage, so raw fills everything the user does not cover - no gaps even
+  # for a rotated or undersized domain.shp. priority_source only affects the
+  # legacy "predicate" mode.
+  priority_source: domain
+  mark_user_column: user              # provenance column on every merged layer:
+                                      #   1 = user feature, 0 = raw (null disables)
+  # How raw is removed where the user has data, per layer:
+  #   coverage  - cut raw along the user geometry so raw fills true gaps
+  #               between user features (wall-to-wall layers: landcover)
+  #   footprint - drop ALL raw inside the user-domain footprint; inside the
+  #               domain the layer is user-only, raw only outside (buildings,
+  #               roofs, walls, trees - their gaps are streets, kept empty)
+  # Unlisted layers default to footprint.
+  raw_fill:
+    landcover: coverage
+    roofs:     footprint
+    walls:     footprint
+    trees:     footprint
+  # Optional per-layer mask polygon: a layer's OWN keep-user boundary,
+  # overriding the shared domain footprint for that layer only. User features
+  # inside the mask are kept, raw fills outside it. Paths resolve against
+  # user_data.dir (bare filename) or project.root (a path). Example: keep
+  # user trees only inside mask_trees.shp, raw everywhere else.
+  # A layer with no mask (the default, {}) falls back to the SHARED domain
+  # footprint - i.e. user_data.domain (domain.shp) if you set one, or the
+  # actual geometry of the user_data.domain_from layer (e.g. landcover) if
+  # you derived the domain that way. There is no implicit "mask_<layer>.shp"
+  # convention - a mask only applies when you point it at a real file below.
+  masks: {}
+  #   trees: mask_trees.shp
+  fix_geometry: true                  # buffer(0) on polygon layers after merge
+  int_columns: [lid, type, code]      # cast to nullable Int64 where present
+  reassign_id:                        # regenerate unique 1..N ids after merge
+    landcover: lid
+  workers: 4
+
+templates:
+  dir: null                           # null -> defaults/templates/ (edit
+                                      #   the .yaml/_p3d files there directly to
+                                      #   change every project's defaults; point
+                                      #   here at a project-specific folder to
+                                      #   override just this project)
+  nested: true
+  cyclic: false                     # true: use the cyclic-boundary p3d template
+                                    #   variants (template_cyclic_*): no offline
+                                    #   nesting, flow driven by geostrophic wind /
+                                    #   pressure gradient, disturbances instead of
+                                    #   STG; pgem and pmeteo are unaffected                        # nested set (parent + N02) or single-domain
+  single_domain: parent               # domain used when nested: false
+  case: null                          # null -> project.name
+  overwrite: false                    # keep existing generated files on rerun
+  topology_select: true               # true: pick from Hynek Reznicek's valid
+                                      #   topologies at the terminal (recommended
+                                      #   one on Enter / non-interactive runs)
+                                      # false: take the recommendation silently
+  list_all_topologies: false          # false: show only the best-packed option
+                                      #   per whole node count (least idle space
+                                      #   on the last node, e.g. only 14.95 of
+                                      #   the 14.xx options); true: list them all
+                                      #   (needs node_cpus to group by nodes)
+  values:                             # null values leave <> placeholders + warn
+    origin_time: null                 # UTC, e.g. "2023-08-23 17:00:00"
+    length: null                      # simulation length: hours as a number (29)
+                                      #   or a unit string ("29 h", "1 d"); fills
+                                      #   end_time (p3d) and length (pmeteo)
+                                      #   (key was formerly simulation_hours)
+    nz_parent: null
+    nz_child: null
+    wrf_date: null                    # WRF path date, e.g. "2023-08-23"
+    # Per-user cluster settings. These fill the <hpc_user> / <wrf_dir>
+    # placeholders in the pgem and pmeteo templates, so nobody has to
+    # edit the templates themselves. Set once in defaults/default.yaml
+    # (inherited by every project) or per project here.
+    hpc_user: null                    # cluster username (pgem pg_user/pg_owner)
+    wrf_dir: null                     # base dir of WRF output, e.g. "/home/me/wrf"
+    # The pgem PostgreSQL password is deliberately NOT a config key - it is
+    # read from the PALM_PGEM_PASSWORD environment variable so it never ends
+    # up in version control:
+    #     export PALM_PGEM_PASSWORD='...'
+    # If unset, the generated pgem_*.yaml keeps the <pg_password> placeholder
+    # for you to fill in by hand.
+    npes_parent: null                 # TARGET core counts steering the topology
+    npes_child: null                  #   recommendation (null -> most cores)
+    node_cpus: null                   # cpus per node (-T): enables the nodes
+                                      #   column, the node limits below, and a
+                                      #   recommendation that wastes the fewest
+                                      #   cores on the last booked node
+    min_nodes: 2                      # hide topologies below this node count
+    max_nodes: 16                     # hide topologies above this node count
+    npex_parent: null                 # null -> topology chooser (topology_select)
+    npey_parent: null
+    npex_child: null
+    npey_child: null
+
+# Seasonal (month-dependent) temperatures - water body, soil, and other
+# scalar p3d values - are NOT configured here. They live in
+# defaults/templates/seasonal.yaml, next to the template skeletons they
+# parameterize, and are selected by the month of templates.values.origin_time.
+# All tables are in KELVIN. To override per project without editing that
+# shared file, add a `seasonal:` section here; it deep-merges over it, e.g.:
+#
+# seasonal:
+#   statistic: max                    # min | ave | max (default: ave)
+#
+report:
+  file: null                          # null -> <output_dir>/domains_report.txt
+  parent_name: parent                 # domain labels in the &nesting_parameters
+  child_name: child                   #   block (npes come from the chosen topology)
+
+stages: [domains, templates, report, clip, merge]

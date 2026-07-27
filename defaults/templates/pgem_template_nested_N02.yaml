@@ -1,0 +1,37 @@
+pg_user: '<hpc_user>'
+pg_password: '<pg_password>'
+pg_port: 5432
+database: 'palm_static'
+pg_owner: '<hpc_user>'
+
+visual_check:
+    enabled: True
+    show_plots: False
+
+input_schema: 'inputs_<case>'
+
+domain:
+    name: '<case>'
+    scenario: '_N02'
+    parent_domain_schema: '<case>'
+    dx: <>
+    dy: <>
+    dz: <>
+    nx: <>
+    ny: <>
+    cent_x: <>
+    cent_y: <>
+
+    
+origin_time: '<>'
+
+logs:
+    level: 2
+    
+# assign water body temperature according to landcover type
+water_pars_temp:   # thermodynamic temperature
+    1: 298.45 # Shore, lakes
+    2: 298.05 # River
+    3: 300    # Open sea
+    4: 298.45 # Pond
+    5: 299.55 # Fountain

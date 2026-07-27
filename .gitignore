@@ -1,0 +1,47 @@
+# ------------------------------
+# Python
+# ------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+
+# ------------------------------
+# Pipeline outputs and state
+# ------------------------------
+output/
+outputs/
+*.state.json
+preproc_state.json
+domains_report.txt
+*.log
+
+# ------------------------------
+# Geospatial data (never commit)
+# ------------------------------
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.qix
+*.sbn
+*.sbx
+*.tif
+*.tiff
+*.nc
+*.geojson
+*.gpkg
+
+# ------------------------------
+# Editors and OS
+# ------------------------------
+.vscode/
+.idea/
+.DS_Store
+*.swp

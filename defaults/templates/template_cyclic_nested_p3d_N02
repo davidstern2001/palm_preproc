@@ -1,0 +1,247 @@
+!------------------------------------------------------------------------------
+!-- CHILD DOMAIN - <case_name>  (parent uses CYCLIC LATERAL BOUNDARIES)
+!-- Grid:   <x> x <y> x <z> cells  (nx=<x-1>, ny=<y-1>, nz=<z>)
+!-- Spacing: dx=dy=dz=<domain_resolution>m
+!-- Domain:  <x.dx>m x <y.dy>m x <z.dz>m
+!-- Offset from root SW corner: x=<>m, y=<>m
+!-- Grid Spacing Ratio (GSR) vs parent: <>
+!--
+!-- This file is the _p3d_N02 file. It must be placed as:
+!--   JOBS/<run_id>/INPUT/<run_id>_p3d_N02
+!-- where <run_id> matches the root domain run identifier.
+!--
+!-- NOTE: Child is initialised from parent domain data at runtime (online nesting).
+!--       nesting_offl_parameters is therefore disabled here.
+!------------------------------------------------------------------------------
+ &initialization_parameters
+!
+!-- model grid
+!--------------------------------------
+         nx = <>, ny = <>, nz = <>,
+         dx = <>.0, dy = <>.0, dz = <>.0,
+!
+!-- building topology
+!--------------------------------------
+         topography = 'read_from_file',
+!
+!-- format of restart file
+!--------------------------------------
+         restart_data_format = 'mpi',
+!
+!-- advection solver
+!--------------------------------------
+         momentum_advec = 'ws-scheme',
+         scalar_advec   = 'ws-scheme',
+         monotonic_limiter_z = .T.,
+!
+!-- pressure solver
+!--------------------------------------
+         psolver = 'multigrid',
+        ! cycle_mg = 'w',
+         mg_cycles = 2,
+        ! mg_switch_to_pe0_level = -1,
+         masking_method = .F.,
+         residual_limit = 0.000001,
+         ngsrb = 8,
+!
+!-- initial and boundary conditions
+!--------------------------------------
+         initializing_actions = 'interpolate_from_parent',
+!         initializing_actions = 'read_restart_data',
+         reference_state = 'horizontal_average',
+         dt_run_control_1d = 3600.0,
+         dt_pr_1d = 3600.0,
+!
+!-- wind speed
+!--------------------------------------
+         ug_surface = 0.0, vg_surface = 0.0,
+!
+!-- temperature
+!--------------------------------------
+         surface_pressure = 1000.,
+         pt_surface = 285.,
+         bc_pt_b = 'dirichlet',
+!
+!-- humidity
+!--------------------------------------
+         humidity = .T.,
+         q_surface = 0.01,
+         bc_q_b = 'dirichlet',
+         check_realistic_q = .F.,
+!
+!-- surface fluxes
+!--------------------------------------
+         constant_flux_layer = .T.,
+         use_surface_fluxes = .T.,
+         allow_roughness_limitation = .T.,
+!
+!-- time origin (must match root domain)
+!--------------------------------------
+         origin_date_time = '<> +00',
+!
+!-- wall/soil spinup (must match parent domain)
+!--------------------------------------
+         spinup_time         = 86400.0,       ! main run: 24 hours
+        ! spinup_time         = 43200.0,       ! DEBUG: 12 hours
+         spinup_pt_mean      = 299.0,
+         spinup_pt_amplitude = 8.0,
+         data_output_during_spinup = .F.,  ! DEBUG: see spinup state
+
+ /
+
+!------------------------------------------------------------------------------
+ &runtime_parameters
+!
+!-- run time (must match root domain end_time)
+!--------------------------------------
+         end_time = <time_in_seconds>.0,    ! main run: <time> h
+        ! end_time = 600.0,        ! DEBUG: 10 min
+         dt_max   = 1.0,
+         debug_output = .F.,
+!
+!-- restart parameters (must match root domain)
+!--------------------------------------
+         restart_time              = 21600.0,  ! 6 hours
+         dt_restart                = 21600.0,  ! 6 hours
+         termination_time_needed   = 600,
+         restart_data_format       = 'mpi',
+!
+!-- processor topology
+!--  npex=<>, npey=<> = <npex.npey> cores
+!--------------------------------------
+         npex = <>,
+         npey = <>,
+!
+!-- 2d/3d output
+!--------------------------------------
+         dt_data_output    = 600.0, ! main run: 10 min
+         dt_data_output_av = 600.0, ! main run: 10 min
+         averaging_interval = 600.0, ! main run: 10 min
+        ! dt_data_output    = 1.0, ! DEBUG: every 1 sec
+        ! dt_data_output_av = 1.0, ! DEBUG: every 1 sec
+        ! averaging_interval = 1.0, ! DEBUG: every 1 sec
+         section_xy  = 0, 1,
+         do3d_at_begin = .T.,
+         do2d_at_begin = .T.,
+         netcdf_data_format = 5,
+         data_output =
+                       'u_av','v_av','w_av','ta_av', 'theta_av', 'p_av', 'q_av', 'rh_av',
+                       't_soil_av', 'm_soil_av',
+                       'tsurf*_xy_av',
+                       !'shf*_xy_av', 'qsws*_xy_av', 'ghf*_xy_av',
+                       'ta_2m*_xy_av', 'theta_2m*_xy_av', 'wspeed_10m*_xy_av', 'qv_2m*_xy',
+                       !'us*_xy_av', 't*_xy_av', 'r_a*_xy_av', 'm_liq*_xy_av',
+                       'rad_net*_xy_av', 'rad_lw_in*_xy_av', 'rad_lw_out*_xy_av', 'rad_sw_in*_xy_av', 'rad_sw_out*_xy_av',
+                       'bio_mrt*_xy_av','bio_pet*_xy_av','bio_utci*_xy_av','bio_perct*_xy_av',
+!
+!-- timeseries output
+!--------------------------------------
+         dt_run_control = 600.0, ! main run: 10 min
+         dt_dots        = 600.0, ! main run: 10 min
+        ! dt_run_control = 1.0,   ! DEBUG run: 1 sec
+        ! dt_dots        = 1.0,   ! DEBUG run: 1 sec
+!
+!-- profile output
+!--------------------------------------
+         skip_time_dopr        = 0.0,
+         dt_dopr               = 600.0, ! main run: 10 min
+         averaging_interval_pr = 600.0, ! main run: 10 min
+        ! dt_dopr               = 60.0, ! DEBUG: every 1 min
+        ! averaging_interval_pr = 60.0, ! DEBUG: every 1 min
+
+         data_output_pr =
+                     '#u','#v','w','#theta','hyp','p',
+                     '#t_soil', '#m_soil',
+                     'rad_lw_in', 'rad_lw_out','rad_sw_in','rad_sw_out',
+                     'theta*2','wtheta','wq','#q','q*2','w"q"', 'w*q*','#l','wqv','w*theta*','w"theta"',
+                     'u*2','v*2','w*2',
+                     'e', 'e*','wu','wv','w*u*', 'w*v*','w"u"', 'w"v"',
+
+ /
+
+!------------------------------------------------------------------------------
+ &radiation_parameters
+         radiation_scheme         = 'external',
+         plant_lw_interact        = .T.,
+         constant_albedo          = .T.,
+         albedo_type              = 0,
+         albedo                   = 0.2,
+         albedo_lw_dir            = 0.2,
+         albedo_lw_dif            = 0.2,
+         albedo_sw_dir            = 0.2,
+         albedo_sw_dif            = 0.2,
+         dt_radiation             = 60.0,
+         nrefsteps                = 5,
+         raytrace_mpi_rma         = .T.,
+         localized_raytracing     = .T.,
+         mrt_skip_roof            = .T.,
+         mrt_include_sw           = .T.,
+         mrt_geom                 = 2,
+         trace_fluxes_above       = 2000.0,
+         unscheduled_radiation_calls = .F.,
+         bufsize_alltoall         = 1000000,
+ /
+
+!------------------------------------------------------------------------------
+ &urban_surface_parameters
+         wall_inner_temperature   = 300.0,
+         roof_inner_temperature   = 300.0,
+         window_inner_temperature = 300.0,
+         roughness_concrete       = 0.001,
+ /
+
+!------------------------------------------------------------------------------
+ &land_surface_parameters
+         root_fraction         = 0.49, 0.26, 0.25, 0.0, 0.0, 0.0, 0.0, 0.0,
+         soil_moisture         = 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.3,
+         soil_temperature      = 279.5, 279.6, 279.1, 279.1, 279.1, 279.1, 279.1, 279.1,
+         deep_soil_temperature = 281.5,
+         constant_roughness    = .T.,
+ /
+
+!------------------------------------------------------------------------------
+ &biometeorology_parameters
+         thermal_comfort = .T.,
+ /
+
+!------------------------------------------------------------------------------
+ &plant_canopy_parameters
+         canopy_mode                  = 'read_from_file',
+         plant_canopy_transpiration   = .T.,
+         canopy_drag_coeff            = 0.3,
+ /
+
+!------------------------------------------------------------------------------
+!-- STG switched off: child receives turbulent inflow from parent via online nesting
+ &stg_par
+         switch_off_module = .T.,
+ /
+
+!------------------------------------------------------------------------------
+!-- Offline nesting is disabled: child BCs come from parent via online nesting
+!-- (the cyclic laterals apply to the PARENT domain; this child is unaffected)
+
+!------------------------------------------------------------------------------
+ &surface_data_output_parameters
+         data_output_surf =
+                           'shf', 'qsws', 'ghf', 'theta_surface', 'q_surface', 'theta1',
+                           'rad_lw_in', 'rad_lw_dif', 'rad_lw_ref', 'rad_lw_res',
+                           'rad_sw_in', 'rad_sw_dif', 'rad_sw_dir', 'rad_sw_ref', 'rad_sw_res',
+                           'rad_lw_out', 'rad_sw_out', 'rad_net',
+                           'ol', 'z0', 'us', 'ts', 'usws', 'vsws', 'r_a', 'r_canopy',
+                           'shf_av', 'qsws_av', 'ghf_av', 'theta_surface_av', 'q_surface_av', 'theta1_av',
+                           'rad_lw_in_av', 'rad_sw_in_av',
+                           'rad_lw_out_av', 'rad_sw_out_av', 'rad_net_av',
+         skip_time_dosurf        = 0.0,
+         dt_dosurf               = 3600.0,
+         skip_time_dosurf_av     = 0.0,
+         averaging_interval_surf = 3600.0,
+         dt_dosurf_av            = 3600.0,
+         to_netcdf               = .T.,
+         to_vtk                  = .F.,
+ /
+
+!------------------------------------------------------------------------------
+ &user_parameters
+         switch_off_module = .T.,
+ /

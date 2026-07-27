@@ -1,0 +1,36 @@
+# ==============================================================
+# Minimal project config.
+# Everything not shown here comes from defaults/default.yaml,
+# applied automatically. See template.yaml for the full reference of every
+# available setting, and defaults/default.yaml for the current
+# site-wide baseline (buffer, resampling, node_cpus, nz auto-calc factors,
+# boundary cleanup, ...).
+# ==============================================================
+
+project:
+  name: example_minimal
+  root: /path/to/palm/DATA
+  output_dir: ./example_minimal
+
+user_data:
+  dir: ./example_minimal/DATA_user
+  domain: null
+  domain_from: landcover              # or: domain: domain.shp
+  layers:
+    landcover: landcover.shp
+    roofs:     roofs.shp
+    walls:     walls.shp
+    trees:     trees.shp
+
+templates:
+  values:
+    origin_time: "2023-08-23 17:00:00"   # UTC
+    length: 29                           # simulation length [h]
+    wrf_date: "2023-08-23"               # WRF path date
+    # nz_parent/nz_child, npes_parent/npes_child, npex/npey: leave unset to
+    # use the auto-calculation / topology chooser from defaults.
+
+# Everything else - CRS, domain buffers, clip/merge/boundary-cleanup
+# behaviour, cluster node limits, report labels, stage list - comes from
+# defaults/default.yaml. Add any key from template.yaml here only if
+# THIS project needs to differ from that baseline.

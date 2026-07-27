@@ -1,0 +1,40 @@
+case: <case>
+dnum: 1
+
+tasks:
+    - wrf
+    - wrf_rad
+
+paths:
+    base: ../model.git/build/JOBS/<case>
+    wrf:
+        file_mask: "<wrf_dir>/<prague_date>/wrfout_d03*"
+        rad_file_mask: "<wrf_dir>/<prague_date>/auxhist6_d03_*"
+
+output:
+    overwrite: true
+    check_mass_balance: true
+
+intermediate_files:
+    #after a successful stage, delete the intermediate file from the previous stage
+    delete_after_success: true
+    
+domain:
+    dz: <domain_resolution>.0
+    nz: <> #required
+    # terrain_offset: 0 
+
+simulation:
+    origin_time: <>
+    length: <> h
+    timestep: 1 h
+    
+radiation:
+    # Off by default (empty so that tasks may overwrite), switched on by tasks or manually
+    enabled: true
+
+wrf:
+    rad_vars:
+        sw_tot_h: SWDOWN #may be also SWDNB
+        sw_dif_h: SWDDIF
+        #lw_tot_h: LWDNB #replaced for GLW

@@ -1,0 +1,118 @@
+# ==============================================================
+# palm_preproc defaults/default.yaml
+# ==============================================================
+# Site-wide defaults, automatically merged in BEFORE every project's own
+# config (config/<project>.yaml): DEFAULTS (hardcoded) -> THIS FILE ->
+# your project config. Edit this file to change the baseline for every new
+# project; any key here can still be overridden per project.
+#
+# To skip this file for one project:      project.no_defaults: true
+# To use a different site-defaults file:   project.defaults_file: <path>
+#
+# Keep genuinely project-specific things (name, root, output_dir, user_data,
+# templates.values.origin_time/length/wrf_date/npes) OUT of this file - they
+# belong in each project's own config.
+# ==============================================================
+
+# The run-configuration template files (pgem_template*.yaml,
+# pmeteo_template*.yaml, template*_p3d) live in defaults/templates/
+# next to this file - edit them directly to change the pgem/pmeteo/p3d
+# skeleton for every future project. A project can still point templates.dir
+# elsewhere to use its own set instead.
+
+crs:
+  aligned: "EPSG:32633"
+
+raw_data:
+  # Resolves against each project's own project.root, so this is safe to
+  # leave here as long as every project keeps DATA_raw as a sibling of its
+  # own subdirectory under the same root.
+  dir: ./DATA_raw
+  aux_files:
+    surface_params.csv: copy
+    import_process.log: create_empty
+
+domains:
+  child:
+    grid_size: 1.0
+    buffer: 0.0
+    min_power: 3
+    optimize_topology: true
+    confirm_optimized: true
+  parent:
+    grid_size: 4.0
+    # PALM convention: a 400-500 m parent buffer around the child keeps
+    # boundary effects (inflow adjustment, outflow damping) away from the
+    # area of interest. 500 m default.
+    buffer: 500.0
+    min_power: 3
+    optimize_topology: true
+    topology_max_overhead: 0.10
+    topology_opt: true
+  align_child_to_parent: true
+  strict_nesting: true
+
+clip:
+  snap_rasters_to_grid: true
+  buildings_mask_layer: roofs
+  buildings_nodata: -9999.0
+  resampling:
+    dem: bilinear
+    buildings: nearest
+    default: nearest
+  workers: 4
+
+merge:
+  mode: difference
+  predicate: within
+  priority_source: domain
+  mark_user_column: user
+  raw_fill:
+    landcover: coverage
+    roofs:     footprint
+    walls:     footprint
+    trees:     footprint
+  masks: {}
+  fix_geometry: true
+  int_columns: [lid, type, code]
+  reassign_id:
+    landcover: lid
+  workers: 4
+
+boundary_cleanup:
+  enabled: true
+  domains: [child, parent]
+  buffer: 20.0                        # ring width for the landcover majority vote
+  landcover_columns: [code, type]
+  roofs_id_column: null               # null -> auto-detect (bid/rid/lid/id)
+  walls_id_column: null
+
+templates:
+  dir: null
+  nested: true
+  cyclic: false                       # true: cyclic-boundary p3d templates
+                                      # (template_cyclic_*; no offline nesting)
+  single_domain: parent
+  overwrite: false
+  topology_select: true
+  list_all_topologies: false
+  values:
+    # Per-user cluster settings: set these once in your copy of this file
+    # (or per project). They fill the <hpc_user> / <wrf_dir> placeholders
+    # in the pgem and pmeteo templates.
+    hpc_user: null                    # cluster username (pgem pg_user/pg_owner)
+    wrf_dir: null                     # base dir of WRF output (pmeteo file masks)
+    # nz auto-calculation defaults (used only when nz_parent/nz_child are
+    # not set explicitly in a project's templates.values):
+    child_nz_height_factor: 4.0       # dz*nz(child) = factor x max building height
+    parent_target_height_m: 2000.0    # dz*nz(parent) ~= this height
+    # Cluster facts - the same for every project on this machine:
+    node_cpus: 80
+    min_nodes: 2
+    max_nodes: 16
+
+report:
+  parent_name: parent
+  child_name: child
+
+stages: [domains, clip, merge, boundary, templates, report]
