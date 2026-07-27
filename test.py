@@ -257,6 +257,7 @@ EXPECTED = [
     "test_p3d", "test_p3d_N02", "test_p3dr", "test_p3dr_N02",
     "pgem_test.yaml", "pgem_test_N02.yaml",
     "pmeteo_test.yaml", "pmeteo_test_N02.yaml",
+    "submit_test.sh",
     "DATA_child/dem.tif", "DATA_child/buildings.tif",
     "DATA_child/landcover.shp", "DATA_child/roofs.shp",
     "DATA_parent/dem.tif", "DATA_parent/landcover.shp",

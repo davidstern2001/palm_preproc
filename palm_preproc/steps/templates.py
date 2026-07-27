@@ -738,6 +738,32 @@ def _write(out_path, text, overwrite):
     log.debug(f"written: {out_path.name}{note}")
 
 
+def fill_submit(text, cfg, case, total_cores):
+    """Fill the palmrun submit script. -X (total MPI processes) comes from
+    the topology actually chosen for this case, -T from node_cpus; the rest
+    are cluster/run choices taken from templates.values. Unset values leave
+    their <> placeholders, as everywhere else."""
+    tv = cfg["templates"]["values"]
+    t = _sub_token(text, "<case>", case)
+    t = _sub_token(t, "<palmrun_id>", tv.get("palmrun_id") or case)
+    if total_cores:
+        t = _sub_token(t, "<total_cores>", total_cores)
+    if tv.get("node_cpus"):
+        t = _sub_token(t, "<node_cpus>", tv["node_cpus"])
+    # Wall-clock limit: same duration syntax as templates.values.length
+    # ("48 h", "2 d", or a bare number of hours), written out in seconds
+    # because that is what palmrun's -t expects.
+    hours = _parse_hours(tv.get("walltime"))
+    if hours:
+        t = _sub_token(t, "<walltime_s>", int(round(hours * 3600)))
+    for key, token in (("palmrun_config", "<palmrun_config>"),
+                       ("palmrun_activation", "<palmrun_activation>"),
+                       ("queue", "<queue>")):
+        if tv.get(key):
+            t = _sub_token(t, token, tv[key])
+    return t
+
+
 def write_templates(child, parent, cfg, state=None):
     """Instantiate all templates for the case into the output directory."""
     tcfg = cfg["templates"]
@@ -762,6 +788,9 @@ def write_templates(child, parent, cfg, state=None):
                 f"pmeteo_{case}_N02.yaml"] if nested else
                [f"{case}_p3d", f"{case}_p3dr",
                 f"pgem_{case}.yaml", f"pmeteo_{case}.yaml"])
+    write_submit = bool(tcfg.get("submit", True))
+    if write_submit:
+        targets.append(f"submit_{case}.sh")
     if not overwrite and all((out_dir / t).exists() for t in targets):
         log.debug("all generated files exist, nothing to do "
                   "(templates.overwrite: true to regenerate)")
@@ -821,6 +850,24 @@ def write_templates(child, parent, cfg, state=None):
                fill_pgem(read("pgem_template.yaml"), ctx), overwrite)
         _write(out_dir / f"pmeteo_{case}.yaml",
                fill_pmeteo(read("pmeteo_template.yaml"), ctx), overwrite)
+
+    # -- palmrun submit script ----------------------------------------
+    # -X must equal the TOTAL number of MPI processes: for a nested run that
+    # is parent + child, not either one alone.
+    if write_submit:
+        tv = tcfg["values"]
+        if nested:
+            total_cores = ((tv.get("npex_parent") or 0) * (tv.get("npey_parent") or 0)
+                           + (tv.get("npex_child") or 0) * (tv.get("npey_child") or 0))
+        else:
+            dname = tcfg.get("single_domain", "parent")
+            total_cores = ((tv.get(f"npex_{dname}") or 0)
+                           * (tv.get(f"npey_{dname}") or 0))
+        sub_path = out_dir / f"submit_{case}.sh"
+        _write(sub_path, fill_submit(read("submit_template.sh"), cfg, case,
+                                     total_cores or None), overwrite)
+        if sub_path.exists():
+            sub_path.chmod(sub_path.stat().st_mode | 0o111)   # make executable
 
     missing = [k for k in ("origin_time", "length", "wrf_date",
                            "hpc_user", "wrf_dir")

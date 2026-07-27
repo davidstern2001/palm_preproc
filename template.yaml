@@ -157,6 +157,9 @@ templates:
                                       #   here at a project-specific folder to
                                       #   override just this project)
   nested: true
+  submit: true                      # also write submit_<case>.sh, a palmrun
+                                    #   submit script whose -X/-T match the
+                                    #   topology chosen for this case
   cyclic: false                     # true: use the cyclic-boundary p3d template
                                     #   variants (template_cyclic_*): no offline
                                     #   nesting, flow driven by geostrophic wind /
@@ -191,6 +194,15 @@ templates:
     wrf_dir: null                     # base dir of WRF output, e.g. "/home/me/wrf"
     npes_parent: null                 # TARGET core counts steering the topology
     npes_child: null                  #   recommendation (null -> most cores)
+    # palmrun submit script (templates.submit). -X (total MPI processes) and
+    # -T come from the chosen topology and node_cpus; these are the rest:
+    palmrun_id: null                  # palmrun -r; null -> the case name
+    palmrun_config: null              # palmrun -c, e.g. default.ifx
+    palmrun_activation: null          # palmrun -a, e.g. "d3# restart"
+    walltime: null                    # palmrun -t: WALL-CLOCK limit ("48 h",
+                                      #   "2 d", or hours as a number) - not
+                                      #   the simulated period
+    queue: null                       # palmrun -q, e.g. qprod
     node_cpus: null                   # cpus per node (-T): enables the nodes
                                       #   column, the node limits below, and a
                                       #   recommendation that wastes the fewest

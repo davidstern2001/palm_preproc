@@ -92,6 +92,7 @@ templates:
   nested: true
   cyclic: false                       # true: cyclic-boundary p3d templates
                                       # (template_cyclic_*; no offline nesting)
+  submit: true                        # also write submit_<case>.sh (palmrun)
   single_domain: parent
   overwrite: false
   topology_select: true
@@ -108,6 +109,15 @@ templates:
     parent_target_height_m: 2000.0    # dz*nz(parent) ~= this height
     # Cluster facts - the same for every project on this machine:
     node_cpus: 80
+    # palmrun submit script (submit_<case>.sh). -X and -T are derived from
+    # the chosen topology and node_cpus; these are the run/cluster choices.
+    palmrun_id: null                  # null -> the case name
+    palmrun_config: default.ifx       # palmrun -c
+    palmrun_activation: "d3# restart" # palmrun -a  (d3f for a restart run)
+    walltime: 48 h                    # WALL-CLOCK limit (palmrun -t), not the
+                                      #   simulated period; same duration
+                                      #   syntax as `length`
+    queue: qprod                      # palmrun -q
     min_nodes: 2
     max_nodes: 16
 
