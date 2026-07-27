@@ -100,6 +100,8 @@ DATA_user/   (optional) your own landcover/roofs/walls/trees.shp and/or building
 
 ## Data you provide, files you get back
 
+**Input formats.** Vector layers may be in any format GeoPandas/GDAL reads — Shapefile, GeoPackage (`.gpkg`), GeoJSON, etc. — set per layer in `raw_data.layers` / `user_data.layers` (e.g. `landcover: landcover.gpkg`). The pipeline always **writes** the clipped vector outputs as Shapefiles, because PALM-GeM consumes Shapefiles; the conversion happens after clipping, on the much smaller domain-sized data. GeoPackage inputs must be single-layer.
+
 **Inputs.** `DATA_raw` is the permanent whole-city source dataset — it is only ever read, never modified. `DATA_user` holds anything project-specific: the area of interest (either an explicit `domain.shp`, or derived from the extent of one of your layers via `user_data.domain_from`), plus any higher-quality layers you want to override the raw data with inside that area. A user layer participates simply by existing; set it to `false` to ignore a file that's present, or to a path to use a file elsewhere.
 
 **The layout at a glance.** Everything hangs off `project.root`; `DATA_raw`
@@ -183,18 +185,6 @@ Later layers override earlier ones, and the merge is **deep** — you can overri
 
 To skip the site defaults for one project use `project.no_defaults: true`; to point at a different defaults file use `project.defaults_file: <path>`. The fully-commented `template.yaml` documents every setting and works as a standalone config too.
 
-### Credentials
-
-The PALM-GeM templates need a PostgreSQL password. It is **not** a config key —
-it is read from an environment variable, so it never lands in version control:
-
-```bash
-export PALM_PGEM_PASSWORD='your-password'
-```
-
-If the variable is unset, the generated `pgem_*.yaml` files keep the literal
-`<pg_password>` placeholder for you to fill in by hand.
-
 ### Key options
 
 A minimal, realistic project config:
@@ -202,7 +192,7 @@ A minimal, realistic project config:
 ```yaml
 project:
   name: my_project
-  root: /path/to/palm/DATA        # base for all relative paths below
+  root: /home/stern/palm/DATA        # base for all relative paths below
   output_dir: ./my_project
 
 user_data:

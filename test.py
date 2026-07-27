@@ -131,8 +131,11 @@ def make_raw_data(raw_dir):
         y0 = ORIGIN_Y + EXTENT - r1 * RAW_RES
         poly = box(x0, y0, x1, y1)
         roofs.append({"bid": i + 1, "katroof": 1, "geometry": poly})
+        # Wall as an inner ring tracing the footprint from inside, like
+        # real wall polygons that overlap their roof footprint - this is
+        # what lets the boundary stage's geometric wall matching find them.
         walls.append({"bid": i + 1, "katwall": 1,
-                      "geometry": poly.buffer(1.0).difference(poly)})
+                      "geometry": poly.difference(poly.buffer(-1.0))})
     gpd.GeoDataFrame(roofs, crs=CRS).to_file(raw_dir / "roofs.shp")
     gpd.GeoDataFrame(walls, crs=CRS).to_file(raw_dir / "walls.shp")
 
@@ -203,13 +206,15 @@ def _write_raster(path, arr, transform, nodata):
         ds.write(arr.astype("float32"), 1)
 
 
-def make_config(root, cfg_path):
+def make_config(root, cfg_path, name="test", extra=""):
     """A minimal project config: everything else comes from the site
-    defaults, which is exactly what a real project should look like."""
+    defaults, which is exactly what a real project should look like.
+    `extra` is appended verbatim (used by the GeoPackage phase to override
+    one input layer's format)."""
     cfg_path.write_text(f"""project:
-  name: test
+  name: {name}
   root: {root}
-  output_dir: ./test
+  output_dir: ./{name}
   overwrite: true
 
 user_data:
@@ -241,7 +246,7 @@ templates:
     node_cpus: 8
     min_nodes: 1
     max_nodes: 8
-""")
+{extra}""")
 
 
 # ------------------------------
@@ -299,8 +304,52 @@ def run(keep=False):
             print(f"FAILED: unfilled placeholders in output: {leftovers}")
             return 1
 
-        print(f"\nOK - {len(EXPECTED)} expected outputs present, "
+        print(f"\nPhase 1 OK - {len(EXPECTED)} expected outputs present, "
               f"templates filled.")
+
+        # ------------------------------
+        # 5. PHASE 2: GEOPACKAGE INPUT
+        # ------------------------------
+        # Convert one raw vector layer to GeoPackage and run again: inputs
+        # may be any GeoPandas-readable format, but the clipped outputs must
+        # come out as Shapefiles (PALM-GeM consumes Shapefiles).
+        print("\nPhase 2: GeoPackage input -> Shapefile output ...")
+        import geopandas as gpd
+        raw = tmp / "DATA_raw"
+        lc = gpd.read_file(raw / "landcover.shp")
+        for ext in (".shp", ".dbf", ".shx", ".prj", ".cpg"):
+            p = raw / f"landcover{ext}"
+            if p.exists():
+                p.unlink()
+        lc.to_file(raw / "landcover.gpkg", driver="GPKG")
+
+        cfg2 = tmp / "test_gpkg.yaml"
+        make_config(tmp, cfg2, name="test_gpkg", extra="""
+raw_data:
+  layers:
+    landcover: landcover.gpkg
+""")
+        print("-" * 70)
+        rc = main(["-c", str(cfg2)])
+        print("-" * 70)
+        if rc != 0:
+            print(f"FAILED: GeoPackage-input run exited with status {rc}")
+            return 1
+        out2 = tmp / "test_gpkg"
+        shp = out2 / "DATA_child" / "landcover.shp"
+        stray = list((out2 / "DATA_child").glob("landcover.gpkg"))
+        if not shp.exists():
+            print("FAILED: DATA_child/landcover.shp not produced from "
+                  "the .gpkg input.")
+            return 1
+        if stray:
+            print(f"FAILED: unexpected GeoPackage in output: {stray}")
+            return 1
+        n = len(gpd.read_file(shp))
+        print(f"Phase 2 OK - landcover.gpkg in -> landcover.shp out "
+              f"({n} features).")
+
+        print("\nOK - all phases passed.")
         print("palm_preproc works in this environment.")
         return 0
     except Exception:

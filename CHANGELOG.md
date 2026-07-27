@@ -24,6 +24,10 @@
 
 **Features**
 
+- The pgem PostgreSQL password is read from the `PALM_PGEM_PASSWORD` environment variable instead of being stored in the templates; if unset, the `<pg_password>` placeholder is left for manual filling.
+
+- Vector inputs may be any format GeoPandas reads (Shapefile, GeoPackage, GeoJSON, ...); the clipped vector outputs are always written as Shapefiles for PALM-GeM, converted after clipping.
+
 - Seasonal, month-dependent temperatures in `defaults/templates/seasonal.yaml`,
   selected by the month of `origin_time`: water body temperatures per landcover
   type (`water_pars_temp`), soil temperature/moisture, and arbitrary scalar p3d

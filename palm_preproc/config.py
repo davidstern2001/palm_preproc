@@ -415,6 +415,18 @@ class Config:
         layer = self.d["user_data"]["domain_from"]
         return self.d["user_data"]["layers"][layer], "extent"
 
+    def output_layer_filename(self, layer):
+        """Filename a layer is WRITTEN under in DATA_<domain>. Vector inputs
+        may be any format GeoPandas reads (.shp, .gpkg, .geojson, ...), but
+        the outputs are always Shapefiles, because PALM-GeM consumes
+        Shapefiles. Converting happens after clipping, when the data has been
+        cut to the (much smaller) domain. Raster layers keep their filename.
+        """
+        fname = self.d["raw_data"]["layers"][layer]
+        if layer in VECTOR_LAYERS:
+            return str(Path(fname).with_suffix(".shp"))
+        return fname
+
     def data_dir(self, domain_name):
         return self.output_dir / f"DATA_{domain_name}"
 

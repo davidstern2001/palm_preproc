@@ -20,7 +20,7 @@ project:
   # Base directory for all relative paths below. Default (null) = the
   # directory of this YAML file; since project configs live in config/,
   # point root at the project directory instead:
-  root: /path/to/palm/DATA
+  root: /home/stern/palm/DATA
   output_dir: ./project_name          # domain_*.shp + DATA_child/ + DATA_parent/ go here
                                       # (relative to project.root)
   state_file: null                    # null -> <output_dir>/palm_preproc_state.json
@@ -189,12 +189,6 @@ templates:
     # (inherited by every project) or per project here.
     hpc_user: null                    # cluster username (pgem pg_user/pg_owner)
     wrf_dir: null                     # base dir of WRF output, e.g. "/home/me/wrf"
-    # The pgem PostgreSQL password is deliberately NOT a config key - it is
-    # read from the PALM_PGEM_PASSWORD environment variable so it never ends
-    # up in version control:
-    #     export PALM_PGEM_PASSWORD='...'
-    # If unset, the generated pgem_*.yaml keeps the <pg_password> placeholder
-    # for you to fill in by hand.
     npes_parent: null                 # TARGET core counts steering the topology
     npes_child: null                  #   recommendation (null -> most cores)
     node_cpus: null                   # cpus per node (-T): enables the nodes

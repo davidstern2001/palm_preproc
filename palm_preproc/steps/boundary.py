@@ -115,11 +115,11 @@ def clean_boundary(domain_name, cfg, spec):
     """Remove boundary-truncated buildings from one domain's final layers
     (roofs, walls, landcover, buildings raster). Returns a report string."""
     ddir = cfg.data_dir(domain_name)
-    layers = cfg["raw_data"]["layers"]
-    roofs_path = ddir / layers["roofs"]
-    walls_path = ddir / layers["walls"]
-    landcover_path = ddir / layers["landcover"]
-    buildings_path = ddir / layers["buildings"]
+    # Written filenames: vectors are always .shp regardless of input format.
+    roofs_path = ddir / cfg.output_layer_filename("roofs")
+    walls_path = ddir / cfg.output_layer_filename("walls")
+    landcover_path = ddir / cfg.output_layer_filename("landcover")
+    buildings_path = ddir / cfg.output_layer_filename("buildings")
     bcfg = cfg["boundary_cleanup"]
 
     if not roofs_path.exists():

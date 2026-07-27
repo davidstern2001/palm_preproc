@@ -184,7 +184,7 @@ def _load_specs(cfg, state):
 def _clip_output_path(cfg, dom, layer):
     """Final clip destination. Layers that will be merged afterwards go into
     an _clipped/ subdirectory; everything else lands in DATA_<dom> directly."""
-    fname = cfg["raw_data"]["layers"][layer]
+    fname = cfg.output_layer_filename(layer)   # vectors forced to .shp
     if cfg.user_layer_path(layer):   # will be merged -> keep the raw clip aside
         return cfg.data_dir(dom) / "_clipped" / fname
     return cfg.data_dir(dom) / fname
@@ -279,8 +279,8 @@ def _mask_buildings(cfg, state, after_merge):
         if state.is_done(key):
             log.debug(f"{_pretty(key)}: already done, skipping.")
             continue
-        raster = cfg.data_dir(dom) / cfg["raw_data"]["layers"]["buildings"]
-        vector = cfg.data_dir(dom) / cfg["raw_data"]["layers"][mask_layer]
+        raster = cfg.data_dir(dom) / cfg.output_layer_filename("buildings")
+        vector = cfg.data_dir(dom) / cfg.output_layer_filename(mask_layer)
         if not raster.exists() or not vector.exists():
             log.warning(f"{_pretty(key)}: buildings or {mask_layer} layer "
                         f"missing; mask skipped.")
@@ -325,8 +325,8 @@ def stage_merge(cfg, state):
             if state.is_done(key):
                 log.debug(f"{_pretty(key)}: already done, skipping.")
                 continue
-            clipped = cfg.data_dir(dom) / "_clipped" / cfg["raw_data"]["layers"][layer]
-            out = cfg.data_dir(dom) / cfg["raw_data"]["layers"][layer]
+            clipped = cfg.data_dir(dom) / "_clipped" / cfg.output_layer_filename(layer)
+            out = cfg.data_dir(dom) / cfg.output_layer_filename(layer)
 
             if layer in RASTER_LAYERS:
                 if not clipped.exists():
@@ -457,7 +457,7 @@ def print_plan(cfg, state, stages):
                     key = f"merge:{dom}:{layer}"
                     status = "done" if state.is_done(key) else "pending"
                     log.info(f"[{key}] {status} -> "
-                             f"{cfg.data_dir(dom) / cfg['raw_data']['layers'][layer]}")
+                             f"{cfg.data_dir(dom) / cfg.output_layer_filename(layer)}")
 
 
 # ------------------------------
