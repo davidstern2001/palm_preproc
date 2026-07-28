@@ -293,10 +293,22 @@ class Config:
             self.base_dir = self.yaml_path.parent
         d["project"]["root"] = str(self.base_dir)
         d["project"]["output_dir"] = self._resolve(d["project"]["output_dir"])
-        if d["project"]["state_file"] is None:
+        # state_file: null -> default path; false -> disabled (no state file);
+        # anything else -> an explicit path. A bare `true` is meaningless and
+        # is treated as null, with a warning: YAML turns unquoted yes/no/on/
+        # off into booleans, so this is an easy thing to write by accident.
+        sf = d["project"]["state_file"]
+        if sf is True:
+            log.warning("Config: project.state_file: true is not a path; "
+                        "using the default. Use `null` for the default, "
+                        "`false` to disable, or quote an explicit path.")
+            sf = None
+        if sf is None:
             d["project"]["state_file"] = d["project"]["output_dir"] / "palm_preproc_state.json"
+        elif sf is False:
+            d["project"]["state_file"] = False
         else:
-            d["project"]["state_file"] = self._resolve(d["project"]["state_file"])
+            d["project"]["state_file"] = self._resolve(sf)
         # Back-compat: map the old inputs.{user_data_dir,domain,user_layers}
         # keys onto the unified user_data section.
         legacy = d.pop("inputs", None)

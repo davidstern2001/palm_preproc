@@ -29,9 +29,16 @@ def config_hash(cfg_dict):
 # ------------------------------
 class State:
     def __init__(self, path, cfg_hash, force=False):
-        self.path = Path(path)
+        # path may be False/None: project.state_file: false disables the
+        # state file entirely, so nothing is written and every run starts
+        # from scratch.
+        self.path = Path(path) if path else None
         self.cfg_hash = cfg_hash
         self._d = {"config_hash": cfg_hash, "done": {}, "data": {}}
+        if self.path is None:
+            log.info("State: disabled (project.state_file: false); "
+                     "no resume information is kept.")
+            return
         if force:
             log.info("State: --force given, ignoring previous state.")
             return
@@ -82,5 +89,7 @@ class State:
 
     # -- persistence ------------------------------------------------------
     def save(self):
+        if self.path is None:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(self._d, indent=2, default=str))

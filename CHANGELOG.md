@@ -4,6 +4,18 @@
 
 **Correctness**
 
+- `project.state_file` accepts `false` (no state file, no resume) as well as
+  `null` (default path) or an explicit path. A boolean previously crashed with
+  `TypeError: argument should be a str ... not 'bool'` — which unquoted YAML
+  values like `no` or `off` also produce.
+
+- `merge.reassign_id` now **creates** the id column when the source layer does
+  not have one, instead of silently doing nothing. A landcover layer without
+  `lid` previously produced output without `lid`, which PALM-GeM reports as
+  `column "lid" does not exist`. A layer that skips the merge step entirely
+  (no user data for it) is now flagged with a warning naming the missing
+  column.
+
 - `boundary`: walls are now matched to boundary-truncated roofs by **geometry**
   (a wall lying under a removed roof's footprint) instead of by a shared
   building-id column. Id matching could delete walls of interior buildings
@@ -23,6 +35,13 @@
   when it was successfully auto-calculated.
 
 **Features**
+
+- A `palmrun` submit script (`submit_<case>.sh`) is generated alongside the
+  namelists, with `-X` (total MPI processes across parent and children) and
+  `-T` taken from the topology chosen for the case, so the submit script can
+  never disagree with the `npex`/`npey` in the `_p3d` files. Wall-clock limit,
+  queue, palmrun config and activation string come from `templates.values`;
+  disable with `templates.submit: false`.
 
 - The pgem PostgreSQL password is read from the `PALM_PGEM_PASSWORD` environment variable instead of being stored in the templates; if unset, the `<pg_password>` placeholder is left for manual filling.
 

@@ -24,6 +24,8 @@ project:
   output_dir: ./project_name          # domain_*.shp + DATA_child/ + DATA_parent/ go here
                                       # (relative to project.root)
   state_file: null                    # null -> <output_dir>/palm_preproc_state.json
+                                      # false -> no state file, no resume
+                                      # or an explicit path (quote it)
   overwrite: false                    # true: regenerate ALL outputs - resume state
                                       # ignored, templates and aux files replaced
                                       # (import_process.log included; use with care)
@@ -156,15 +158,15 @@ templates:
                                       #   change every project's defaults; point
                                       #   here at a project-specific folder to
                                       #   override just this project)
-  nested: true
-  submit: true                      # also write submit_<case>.sh, a palmrun
-                                    #   submit script whose -X/-T match the
-                                    #   topology chosen for this case
-  cyclic: false                     # true: use the cyclic-boundary p3d template
-                                    #   variants (template_cyclic_*): no offline
-                                    #   nesting, flow driven by geostrophic wind /
-                                    #   pressure gradient, disturbances instead of
-                                    #   STG; pgem and pmeteo are unaffected                        # nested set (parent + N02) or single-domain
+  nested: true                        # nested set (parent + N02) or single-domain
+  submit: true                        # also write submit_<case>.sh, a palmrun
+                                      #   submit script whose -X/-T match the
+                                      #   topology chosen for this case
+  cyclic: false                       # true: use the cyclic-boundary p3d template
+                                      #   variants (template_cyclic_*): no offline
+                                      #   nesting, flow driven by geostrophic wind /
+                                      #   pressure gradient, disturbances instead of
+                                      #   STG; pgem and pmeteo are unaffected
   single_domain: parent               # domain used when nested: false
   case: null                          # null -> project.name
   overwrite: false                    # keep existing generated files on rerun

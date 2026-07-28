@@ -161,6 +161,7 @@ your layers in it, copy `template.yaml` to `config/<project>.yaml`, point
 | `<case>_p3dr`, `<case>_p3dr_N02` | templates | Restart namelists — identical, but `initializing_actions` is switched to reading restart data |
 | `pgem_<case>.yaml`, `pgem_<case>_N02.yaml` | templates | Static-driver generator configs (dx/dy/dz, nx/ny, cent_x/cent_y, origin_time) |
 | `pmeteo_<case>.yaml`, `pmeteo_<case>_N02.yaml` | templates | palm_meteo configs (dz, nz, origin_time, length, WRF paths via `wrf_date`) |
+| `submit_<case>.sh` | templates | `palmrun` submit script; `-X` (total MPI processes, parent + children) and `-T` come from the chosen topology, so it always matches the `_p3d` files. Wall-clock limit, queue, `-c` and `-a` from `templates.values`; disable with `templates.submit: false` |
 | `domains_report.txt` | report | Case summary, nesting validation, `&nesting_parameters`, and a summary table |
 | `palm_preproc_state.json` | — | Resume state |
 
