@@ -69,9 +69,15 @@ def _finalize(gdf, fix_geometry, int_columns, reassign_id):
                 notes.append(f"buffer(0) dropped {before - len(gdf)} empties")
     if reassign_id:
         col = reassign_id.lower()
-        if col in gdf.columns:
-            gdf[col] = range(1, len(gdf) + 1)
-            notes.append(f"'{col}' reassigned 1..{len(gdf)}")
+        # Create the column when it is absent, don't just renumber an
+        # existing one. Configuring reassign_id means "the output must carry
+        # a unique 1..N id under this name" - downstream tools rely on it
+        # (PALM-GeM looks landcover up by 'lid'), and a source layer that
+        # simply never had the column used to produce output without it.
+        existed = col in gdf.columns
+        gdf[col] = range(1, len(gdf) + 1)
+        notes.append(f"'{col}' {'reassigned' if existed else 'created'} "
+                     f"1..{len(gdf)}")
     for col in (c.lower() for c in int_columns or ()):
         if col in gdf.columns:
             gdf[col] = pd.to_numeric(gdf[col], errors="coerce").astype("Int64")

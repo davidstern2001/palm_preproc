@@ -356,6 +356,39 @@ def stage_merge(cfg, state):
 
     _run_parallel("merge", tasks, cfg["merge"]["workers"], state)
     _mask_buildings(cfg, state, after_merge=True)
+    _check_id_columns(cfg)
+
+
+def _check_id_columns(cfg):
+    """Warn if a final vector layer is missing the id column configured in
+    merge.reassign_id. The merge step creates it, but a layer with no user
+    data never goes through merge, so it keeps whatever the raw source had.
+    Downstream tools look layers up by these columns (PALM-GeM reads
+    landcover by 'lid'), and a missing one surfaces there as an opaque SQL
+    error, so it is worth catching here."""
+    reassign = cfg["merge"].get("reassign_id") or {}
+    if not reassign:
+        return
+    try:
+        import geopandas as gpd
+    except ImportError:
+        return
+    for dom in ("child", "parent"):
+        for layer, col in reassign.items():
+            path = cfg.data_dir(dom) / cfg.output_layer_filename(layer)
+            if not path.exists():
+                continue
+            try:
+                cols = [c.lower() for c in gpd.read_file(path, rows=1).columns]
+            except Exception:
+                continue
+            if str(col).lower() not in cols:
+                log.warning(
+                    f"{dom}/{layer}: no '{col}' column in {path.name} "
+                    f"(merge.reassign_id expects one). The layer did not go "
+                    f"through the merge step, so the raw source's columns "
+                    f"were kept. Downstream tools that look this layer up by "
+                    f"'{col}' will fail.")
 
 
 # ------------------------------
