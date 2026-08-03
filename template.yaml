@@ -20,7 +20,7 @@ project:
   # Base directory for all relative paths below. Default (null) = the
   # directory of this YAML file; since project configs live in config/,
   # point root at the project directory instead:
-  root: /home/stern/palm/DATA
+  root: /path/to/palm/DATA
   output_dir: ./project_name          # domain_*.shp + DATA_child/ + DATA_parent/ go here
                                       # (relative to project.root)
   state_file: null                    # null -> <output_dir>/palm_preproc_state.json

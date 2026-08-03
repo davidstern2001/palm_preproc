@@ -193,7 +193,7 @@ A minimal, realistic project config:
 ```yaml
 project:
   name: my_project
-  root: /home/stern/palm/DATA        # base for all relative paths below
+  root: /path/to/palm/DATA        # base for all relative paths below
   output_dir: ./my_project
 
 user_data:
