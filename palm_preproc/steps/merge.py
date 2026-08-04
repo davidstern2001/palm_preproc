@@ -169,10 +169,24 @@ def coalesce_task(user_src, raw_src, out, priority_wkt, rect_wkt, target_crs,
             user_geom = user_kept.geometry.union_all()
             areal = float(getattr(user_geom, "area", 0.0)) > 0
             if fill_mode == "coverage" and areal and not mask_wkt:
-                raw_kept["geometry"] = raw_kept.geometry.difference(user_geom)
-                raw_kept = raw_kept[~raw_kept.geometry.is_empty]
+                # Difference only the raw features the user geometry can
+                # actually touch. Differencing EVERY raw feature against one
+                # large unioned geometry costs a full-geometry test per
+                # feature, which on a city-wide landcover layer is the most
+                # expensive operation in the pipeline; the ones outside the
+                # user coverage come through unchanged anyway.
+                hit = raw_kept.sindex.query(user_geom, predicate="intersects")
+                if len(hit):
+                    hit_idx = raw_kept.index[hit]
+                    cut = raw_kept.loc[hit_idx].geometry.difference(user_geom)
+                    raw_kept.loc[hit_idx, "geometry"] = cut
+                    raw_kept = raw_kept[~raw_kept.geometry.is_empty]
             else:
-                raw_kept = raw_kept[~raw_kept.geometry.intersects(prio)]
+                # Same idea: only features intersecting the footprint can
+                # be dropped, so the index decides membership directly.
+                hit = raw_kept.sindex.query(prio, predicate="intersects")
+                if len(hit):
+                    raw_kept = raw_kept.drop(index=raw_kept.index[hit])
     elif mode == "predicate":
         pred = getattr(user.geometry, predicate)
         user_kept = user[pred(prio)]

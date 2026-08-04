@@ -172,6 +172,31 @@ def _summary_table(child, parent, rcfg, npes, llx, lly, gsr):
 # ------------------------------
 # 4. REPORT WRITER
 # ------------------------------
+def _provenance_lines(cfg):
+    """How this case was built: version, config file, config hash, command.
+
+    A generated case directory is otherwise anonymous - the p3d says what
+    the grid is, nothing says which palm_preproc and which config produced
+    it. The config hash is the same one the resume state uses, so two runs
+    that differ only in a setting are distinguishable.
+    """
+    import shlex
+    import sys as _sys
+    from .. import __version__
+    from ..state import config_hash
+
+    try:
+        sha = config_hash(cfg.as_plain_dict())
+    except Exception:
+        sha = "?"
+    return [
+        f" palm_preproc: {__version__}",
+        f" config file:  {getattr(cfg, 'yaml_path', '?')}",
+        f" config hash:  {sha}",
+        f" command:      {' '.join(shlex.quote(a) for a in _sys.argv)}",
+    ]
+
+
 def write_domain_report(child, parent, cfg, out_path=None, topology=None):
     """Assemble and write the domain report. Returns the report path."""
     rcfg = cfg["report"]
@@ -186,6 +211,7 @@ def write_domain_report(child, parent, cfg, out_path=None, topology=None):
     _src, _kind = cfg.domain_source()
     L.append(f" domain input: {_src}"
              + ("" if _kind == "domain" else "  (layer extent)"))
+    L += _provenance_lines(cfg)
     L.append("=" * 62)
     L.append("")
 

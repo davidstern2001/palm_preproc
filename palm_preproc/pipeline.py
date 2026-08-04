@@ -21,7 +21,8 @@ from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
 from .config import Config, ConfigError, RASTER_LAYERS, VECTOR_LAYERS, ALL_LAYERS
-from .log import debug as log_debug, get_logger, progress, setup_logging
+from .log import (debug as log_debug, emit_to_file_only, get_logger,
+                  progress, setup_logging)
 from .state import State, config_hash
 from .steps.clip import (clip_raster_task, clip_vector_task,
                          mask_raster_to_vector_task,
@@ -62,16 +63,27 @@ def stage_domains(cfg, state):
         raise RuntimeError(f"{Path(src_path).name} has no CRS defined.")
     gdf_al = gdf.to_crs(aligned)
 
-    # On resume, reuse the exact geometry decided on the first run (which may
-    # have involved an interactive child-optimization choice) instead of
-    # recomputing / re-prompting, so a resumed or non-interactive rerun can
-    # never silently land on a different extent than the clipped data.
+    # Reuse the exact geometry decided on the first run (which may have
+    # involved an interactive child-optimization choice) instead of
+    # recomputing and re-prompting, so a rerun can never silently land on a
+    # different extent than the already-clipped data.
+    #
+    # The guard used to be `state.is_done("domains") and ...`, which is
+    # unreachable: the function returns early on is_done("domains") a few
+    # lines above. So the reuse never actually happened; it only looked as
+    # though it did, because the early return covers the common case.
+    # `--stages domains` and `--stages domains clip` DID fall through and
+    # recompute, re-prompting for the child size. Keying on the saved specs
+    # alone makes the documented behaviour real.
     saved_child = state.get_data("spec_child")
     saved_parent = state.get_data("spec_parent")
-    if state.is_done("domains") and saved_child and saved_parent:
+    if saved_child and saved_parent:
         child = DomainSpec.from_dict(saved_child)
         parent = DomainSpec.from_dict(saved_parent)
-        log.debug("Reusing domain geometry from the resume state.")
+        log.info("Reusing the domain geometry recorded in the resume state "
+                 "({}x{} child, {}x{} parent); --force recomputes it."
+                 .format(child.width_pts, child.height_pts,
+                         parent.width_pts, parent.height_pts))
     else:
         child = make_child_spec(
             gdf_al.total_bounds, cfg["domains"]["child"], aligned,
@@ -115,12 +127,12 @@ def stage_domains(cfg, state):
     #     would strip raw from areas the user never covered. Areal sources use
     #     their dissolved coverage; point/line sources fall back to the convex
     #     hull. The optimization-enlarged ring is filled with raw either way.
-    if src_kind == "domain":
-        footprint = gdf_al.geometry.union_all()
-    else:
-        footprint = gdf_al.geometry.union_all()
-        if float(getattr(footprint, "area", 0.0)) <= 0:
-            footprint = footprint.convex_hull
+    footprint = gdf_al.geometry.union_all()
+    if float(getattr(footprint, "area", 0.0)) <= 0:
+        # Point/line source (or a degenerate polygon): fall back to the hull
+        # so there is an area to give the user priority over. An explicit
+        # domain.shp is areal already, so this is a no-op for it.
+        footprint = footprint.convex_hull
     state.set_data("priority_wkt", footprint.wkt)
 
     # Per-layer merge masks -> store as WKT in the aligned CRS so merge
@@ -526,27 +538,58 @@ def main(argv=None):
                     help="WARNING-level logging only")
     ap.add_argument("--log-datetime", action="store_true",
                     help="full date in timestamps (time-only is the default)")
+    ap.add_argument("--log-file", default=None, metavar="PATH",
+                    help="also append the log to this file (uncoloured, "
+                         "always dated); default: <output_dir>/"
+                         "palm_preproc.log, disable with --log-file ''")
+    ap.add_argument("--version", action="store_true",
+                    help="print the palm_preproc version and exit")
     args = ap.parse_args(argv)
 
-    verbosity = "debug" if args.verbose else ("warning" if args.quiet else "info")
-    setup_logging(verbosity, args.log_datetime)
-
-    # Version + interactivity up front: a batch job's log should say which
-    # code produced it, and that prompts were auto-answered (otherwise the
-    # same config behaves "differently" on a login node, which looks like a
-    # malfunction).
     from . import __version__
-    log.info(f"palm_preproc {__version__}")
-    if not sys.stdin.isatty():
-        log.info("non-interactive session: prompts auto-accept the "
-                 "recommended option (child sizing confirmation, "
-                 "processor topology choice)")
+    if args.version:
+        print(f"palm_preproc {__version__}")
+        return 0
+
+    verbosity = "debug" if args.verbose else ("warning" if args.quiet else "info")
+    # The config is not loaded yet, so the default log path is not known.
+    # Start on stderr only and re-init once output_dir is resolved.
+    setup_logging(verbosity, args.log_datetime, args.log_file or None)
+
+    def _log_header():
+        # Version + interactivity up front: a batch job's log should say
+        # which code produced it, and that prompts were auto-answered
+        # (otherwise the same config behaves "differently" on a login node,
+        # which looks like a malfunction).
+        log.info(f"palm_preproc {__version__}")
+        if not sys.stdin.isatty():
+            log.info("non-interactive session: prompts auto-accept the "
+                     "recommended option (child sizing confirmation, "
+                     "processor topology choice)")
+
+    _log_header()
 
     try:
         cfg = Config(args.config)
     except (ConfigError, FileNotFoundError) as exc:
         log.error(f"Config error: {exc}")
         return 1
+
+    # Default the log file into the output directory now that it is known,
+    # so every case ends up with a record of how it was built next to the
+    # files it produced. --log-file '' opts out. Re-initialising clears the
+    # handlers, so the header is re-emitted; otherwise the file would open
+    # mid-run with no record of which version wrote it.
+    if args.log_file is None:
+        setup_logging(verbosity, args.log_datetime,
+                      cfg.output_dir / "palm_preproc.log")
+        # Into the FILE only: stderr already showed the header above, and
+        # re-emitting normally printed every header line twice.
+        emit_to_file_only(f"palm_preproc {__version__}")
+        if not sys.stdin.isatty():
+            emit_to_file_only("non-interactive session: prompts auto-accept "
+                              "the recommended option")
+        log.debug(f"logging to {cfg.output_dir / 'palm_preproc.log'}")
 
     overwrite_all = bool(cfg["project"].get("overwrite"))
     if overwrite_all:

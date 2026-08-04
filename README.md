@@ -67,6 +67,14 @@ python run_preproc.py -c config/my_project.yaml
 If `test.py` fails, the message says whether a dependency is missing or a
 stage broke — fix that before pointing the pipeline at real data.
 
+Unit tests for the pure functions — the topology rules, grid snapping, the
+nesting validation, the namelist substitution and the duration parser —
+need no data at all and run in a second:
+
+```bash
+pytest tests/
+```
+
 It may also report that **EPSG code lookups fail** while still finishing
 successfully. That means the environment's PROJ database (`proj.db`) is stale
 or mismatched — commonly a leftover `PROJ_DATA`/`PROJ_LIB` variable, or conda
@@ -144,6 +152,7 @@ is a sibling of the per-project directories, shared by all of them:
     ├── pgem_<case>.yaml, pgem_<case>_N02.yaml
     ├── pmeteo_<case>.yaml, pmeteo_<case>_N02.yaml
     ├── domains_report.txt
+    ├── palm_preproc.log               run log (--log-file to move/disable)
     └── palm_preproc_state.json
 ```
 
@@ -162,7 +171,8 @@ your layers in it, copy `template.yaml` to `config/<project>.yaml`, point
 | `pgem_<case>.yaml`, `pgem_<case>_N02.yaml` | templates | Static-driver generator configs (dx/dy/dz, nx/ny, cent_x/cent_y, origin_time) |
 | `pmeteo_<case>.yaml`, `pmeteo_<case>_N02.yaml` | templates | palm_meteo configs (dz, nz, origin_time, length, WRF paths via `wrf_date`) |
 | `submit_<case>.sh` | templates | `palmrun` submit script; `-X` (total MPI processes, parent + children) and `-T` come from the chosen topology, so it always matches the `_p3d` files. Wall-clock limit, queue, `-c` and `-a` from `templates.values`; disable with `templates.submit: false` |
-| `domains_report.txt` | report | Case summary, nesting validation, `&nesting_parameters`, and a summary table |
+| `domains_report.txt` | report | Case summary, nesting validation, `&nesting_parameters`, a summary table, and a provenance header (version, config path, config hash, command line) |
+| `palm_preproc.log` | — | Full run log, including the topology and child-sizing decisions. Move it with `--log-file PATH`, disable with `--log-file ''` |
 | `palm_preproc_state.json` | — | Resume state |
 
 With `templates.nested: false` only the single-domain set is produced (`<case>_p3d`, `<case>_p3dr`, `pgem_<case>.yaml`, `pmeteo_<case>.yaml`), using the domain named in `templates.single_domain`.
@@ -193,7 +203,7 @@ A minimal, realistic project config:
 ```yaml
 project:
   name: my_project
-  root: /path/to/palm/DATA        # base for all relative paths below
+  root: /home/stern/palm/DATA        # base for all relative paths below
   output_dir: ./my_project
 
 user_data:
@@ -304,6 +314,8 @@ The report also validates the geometry these values rely on: llx/lly on the pare
 | `-v`, `--verbose` | DEBUG-level logging |
 | `-q`, `--quiet` | WARNING-level logging only |
 | `--log-datetime` | Prepend full date+time to log lines (default is HH:MM:SS) |
+| `--log-file PATH` | Also append the log to a file (uncoloured, always dated). Defaults to `<output_dir>/palm_preproc.log`; `--log-file ''` disables it |
+| `--version` | Print the version and exit |
 
 Logging follows the PALM-GeM style (Bureš & Resler, ICS CAS): timestamped lines, bold step announcements, indented detail, level tags only for warnings and errors.
 

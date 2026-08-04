@@ -51,8 +51,17 @@ _PLACEHOLDER_RE = re.compile(r"<[A-Za-z0-9_.\- ]*>")
 # ------------------------------
 def _sub_keyed(text, key, value, sep=r"=", suffix=""):
     """Replace `key <sep> <>` (+optional literal suffix like '.0') on any
-    line, keeping everything around it."""
-    pattern = re.compile(rf"({re.escape(key)}\s*{sep}\s*)<>{re.escape(suffix)}")
+    line, keeping everything around it.
+
+    The key is anchored on its left with a negative lookbehind, so a short
+    key can never match the TAIL of a longer one: without it,
+    `_sub_keyed(t, "nz", ...)` also fires inside `max_nz = <>` and
+    `_sub_keyed(t, "dz", ...)` inside `ref_dz = <>`, silently writing the
+    wrong value into a namelist. The current skeletons happen to have no
+    such pair, but adding one would corrupt a run with no error anywhere.
+    """
+    pattern = re.compile(
+        rf"(?<![A-Za-z0-9_])({re.escape(key)}\s*{sep}\s*)<>{re.escape(suffix)}")
     return pattern.sub(lambda m: f"{m.group(1)}{value}", text)
 
 
@@ -441,13 +450,27 @@ def _apply_water_temps(text, temps):
 def _parse_hours(value):
     """Simulation length in hours. Accepts a bare number (hours) or a
     duration string with an explicit unit: '29 h', '1 d', '90 min', '3600 s'
-    (palm_meteo's duration style). Returns float hours, or None."""
+    (palm_meteo's duration style). Returns float hours, or None.
+
+    A bare number written as a STRING ('29', or `length: "29"` in YAML,
+    which is also what a value like `29.0` becomes once quoted) counts as
+    hours too. It used to fall through the unit regex and return None, so
+    the length was silently dropped and `<time>` / `<time_in_seconds>` were
+    left as placeholders in the p3d.
+    """
     if value is None:
+        return None
+    if isinstance(value, bool):        # YAML `length: yes` -> True
         return None
     if isinstance(value, (int, float)):
         return float(value)
+    s = str(value).strip()
+    try:
+        return float(s)                # bare numeric string = hours
+    except ValueError:
+        pass
     m = re.match(r"\s*([0-9.]+)\s*(h|hr|hours?|d|days?|m|min|minutes?|s|secs?|seconds?)\s*$",
-                 str(value), re.I)
+                 s, re.I)
     if not m:
         log.warning(f"templates.values.length: cannot parse duration "
                     f"{value!r}; expected a number of hours or e.g. '29 h', "

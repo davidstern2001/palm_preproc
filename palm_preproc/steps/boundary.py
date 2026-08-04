@@ -71,35 +71,73 @@ def _relabel_landcover(landcover, footprints, buffer_m, columns,
 
     geoms = footprints.geometry if hasattr(footprints, "geometry") \
         else footprints
+
+    # Every candidate lookup goes through the spatial index. Testing each
+    # removed building against the WHOLE landcover frame (two full
+    # .intersection().area passes per building) is O(n_removed x
+    # n_landcover) and dominated the stage: a domain with a few hundred
+    # boundary buildings and a real city landcover layer spent minutes here.
+    # The index reduces each building to the handful of parcels it can
+    # actually touch; the arithmetic below is unchanged.
+    sindex = landcover.sindex
+    lc_geom = landcover.geometry
+    lc_area = lc_geom.area
+
     for fp in geoms:
         if fp is None or fp.is_empty or fp.area <= 0:
             continue
-        inter = landcover.geometry.intersection(fp).area
+
+        # -- parcels under THIS building -------------------------------
+        cand = sindex.query(fp, predicate="intersects")
+        if len(cand) == 0:
+            continue
+        cand_idx = landcover.index[cand]
+        sub = lc_geom.iloc[cand]
+        inter = sub.intersection(fp).area
         # local threshold: fraction of the smaller of parcel / footprint
-        denom = landcover.geometry.area.clip(upper=fp.area)
+        denom = lc_area.iloc[cand].clip(upper=fp.area)
         frac = inter / denom.replace(0, pd.NA)
-        under = landcover[(frac > min_overlap_frac).fillna(False)]
-        if under.empty:
+        under_mask = (frac > min_overlap_frac).fillna(False)
+        under_idx = cand_idx[under_mask.values]
+        # A parcel already relabeled by an earlier building keeps that
+        # label: the docstring has always said the first claimant wins,
+        # but the previous code reassigned it on every later hit, so the
+        # LAST building actually won. Now it matches what is documented.
+        under_idx = under_idx.difference(pd.Index(sorted(relabeled)))
+        if under_idx.empty:
             continue
 
+        # -- majority vote from the ring around THIS building ----------
         ring = fp.buffer(buffer_m).difference(all_removed)
         if ring.is_empty:
             continue
-        ring_overlap = landcover.geometry.intersection(ring).area
-        surround = landcover[(ring_overlap > 0)
-                             & ~landcover.index.isin(under.index)]
-        if surround.empty:
+        rcand = sindex.query(ring, predicate="intersects")
+        if len(rcand) == 0:
             continue
-        weights = surround.geometry.intersection(ring).area
+        rcand_idx = landcover.index[rcand]
+        keep = ~rcand_idx.isin(under_idx)
+        if not keep.any():
+            continue
+        rcand_idx = rcand_idx[keep]
+        ring_geom = lc_geom.loc[rcand_idx]
+        # One intersection pass, reused as both the surround test and the
+        # vote weights (it used to be computed twice).
+        weights = ring_geom.intersection(ring).area
+        pos = weights.values > 0
+        if not pos.any():
+            continue
+        surround_idx = rcand_idx[pos]
+        w = weights.values[pos]
+
         for col in cols:
-            tmp = pd.DataFrame({"val": surround[col].values,
-                                "w": weights.values}).dropna(subset=["val"])
+            tmp = pd.DataFrame({"val": landcover.loc[surround_idx, col].values,
+                                "w": w}).dropna(subset=["val"])
             tmp = tmp[tmp["w"] > 0]
             if tmp.empty:
                 continue
             majority = tmp.groupby("val")["w"].sum().idxmax()
-            landcover.loc[under.index, col] = majority
-        relabeled.update(under.index)
+            landcover.loc[under_idx, col] = majority
+        relabeled.update(under_idx)
     return len(relabeled)
 
 

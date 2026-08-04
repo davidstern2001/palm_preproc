@@ -69,11 +69,17 @@ class _PalmFormatter(logging.Formatter):
 # ------------------------------
 # 2. SETUP
 # ------------------------------
-def setup_logging(verbosity="info", log_datetime=False):
+def setup_logging(verbosity="info", log_datetime=False, log_file=None):
     """Initialise and return the palm_preproc logger.
 
     verbosity : "debug" | "info" | "warning"
     log_datetime : bool - full date in the timestamp instead of HH:MM:SS.
+    log_file : path-like or None - also append every line to this file,
+        uncoloured and always with a full date. A queued job otherwise
+        leaves no record unless the batch system captures stderr, and the
+        interactive decisions this pipeline makes (topology choice, child
+        sizing) are exactly what you want written down. Appended to, so a
+        rerun keeps the earlier attempts.
     """
     level = {"debug": logging.DEBUG, "info": logging.INFO,
              "warning": logging.WARNING, "warn": logging.WARNING
@@ -89,6 +95,18 @@ def setup_logging(verbosity="info", log_datetime=False):
     handler.setFormatter(_PalmFormatter(use_colour=sys.stderr.isatty(),
                                         log_datetime=log_datetime))
     logger.addHandler(handler)
+
+    if log_file:
+        from pathlib import Path
+        p = Path(log_file)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(p, mode="a", encoding="utf-8")
+        fh.setLevel(level)
+        # Never colour a file (ANSI escapes make it unreadable in an
+        # editor) and always date it (a log read weeks later needs it).
+        fh.setFormatter(_PalmFormatter(use_colour=False, log_datetime=True))
+        logger.addHandler(fh)
+
     logger.propagate = False
     return logger
 
@@ -99,6 +117,24 @@ def get_logger():
     if not logger.handlers:
         return setup_logging()
     return logger
+
+def emit_to_file_only(msg, *args, level=None):
+    """Log a line to the FILE handler only, not to stderr.
+
+    The startup header is emitted before the config is read, because a
+    config error must still say which version produced it. Attaching the
+    log file afterwards clears the handlers, so the header would be
+    missing from the file - but simply re-emitting it printed every header
+    line twice on the terminal. This writes to the file handler alone.
+    """
+    import logging as _logging
+    logger = get_logger()
+    text = msg.format(*args) if args else msg
+    rec = logger.makeRecord(logger.name, level or _logging.INFO, "(log)", 0,
+                            text, (), None)
+    for h in logger.handlers:
+        if isinstance(h, _logging.FileHandler):
+            h.handle(rec)
 
 
 # ------------------------------
