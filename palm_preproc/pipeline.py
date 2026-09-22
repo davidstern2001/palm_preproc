@@ -17,6 +17,7 @@ Stages:
 import argparse
 import shutil
 import sys
+import time
 from pathlib import Path
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
@@ -57,7 +58,7 @@ def stage_domains(cfg, state):
     else:
         progress("Deriving the domain from the {} layer extent",
                  cfg["user_data"]["domain_from"])
-    log_debug("Domain source ({}): {}", src_kind, src_path)
+    log_debug("[domains] source ({}): {}", src_kind, src_path)
     gdf = gpd.read_file(src_path)
     if gdf.crs is None:
         raise RuntimeError(f"{Path(src_path).name} has no CRS defined.")
@@ -80,8 +81,8 @@ def stage_domains(cfg, state):
     if saved_child and saved_parent:
         child = DomainSpec.from_dict(saved_child)
         parent = DomainSpec.from_dict(saved_parent)
-        log.info("Reusing the domain geometry recorded in the resume state "
-                 "({}x{} child, {}x{} parent); --force recomputes it."
+        log.info("[domains] reusing the saved geometry ({}x{} child, {}x{} "
+                 "parent); --force recomputes it."
                  .format(child.width_pts, child.height_pts,
                          parent.width_pts, parent.height_pts))
     else:
@@ -105,16 +106,15 @@ def stage_domains(cfg, state):
            for n in ("child", "parent")):
         cleared = state.invalidate_prefixes(("clip:", "merge:", "mask:", "boundary:"))
         if cleared:
-            log.warning(f"Domain geometry changed since the last run; "
-                        f"invalidated {cleared} clip/merge/mask step(s) so "
-                        f"the new extent is regenerated.")
+            log.warning(f"[domains] geometry changed since the last run - "
+                        f"{cleared} clip/merge/mask step(s) will be redone.")
 
     progress("Writing domain rectangles")
     for spec in (child, parent):
         out = cfg.output_dir / f"domain_{spec.name}.shp"
         out.parent.mkdir(parents=True, exist_ok=True)
         spec.to_gdf(dom_out_crs).to_file(out)
-        log.debug(f"Written: {out}")
+        log.info(f"[domains] wrote {out.name}")
         state.set_data(f"spec_{spec.name}", spec.to_dict())
 
     # Priority footprint for the merge stage - a SINGLE footprint shared by
@@ -147,7 +147,7 @@ def stage_domains(cfg, state):
         if float(getattr(geom, "area", 0.0)) <= 0:
             geom = geom.convex_hull
         mask_wkt[layer] = geom.wkt
-        log.debug(f"merge mask for {layer}: {mpath}")
+        log.debug(f"[domains] merge mask for {layer}: {mpath}")
     state.set_data("mask_wkt", mask_wkt)
     state.mark_done("domains")
 
@@ -160,17 +160,17 @@ def stage_report(cfg, state):
 
 def stage_boundary(cfg, state):
     if not cfg["boundary_cleanup"].get("enabled", True):
-        log.debug("boundary_cleanup disabled, skipping.")
+        log.info("[boundary] disabled, skipping.")
         return
     specs = _load_specs(cfg, state)
     domains = cfg["boundary_cleanup"].get("domains", DOMAIN_NAMES)
     for dom in domains:
         key = f"boundary:{dom}"
         if state.is_done(key):
-            log.debug(f"{_pretty(key)}: already done, skipping.")
+            log.info(f"{_pretty(key)}: kept (already done)")
             continue
         msg = clean_boundary(dom, cfg, specs[dom])
-        log.info(msg)
+        log.info(f"[boundary] {msg}")
         state.mark_done(key)
 
 
@@ -214,21 +214,21 @@ def _place_aux_files(cfg):
         for fname, mode in aux.items():
             dst = ddir / fname
             if dst.exists() and not cfg["project"].get("overwrite"):
-                log.debug(f"[clip] {dom}/{fname}: exists, kept.")
+                log.info(f"[aux] {dom}/{fname}: kept (exists)")
                 continue
             if mode == "copy":
                 src = cfg["raw_data"]["dir"] / fname
                 if not src.exists():
-                    log.warning(f"[clip] {dom}/{fname}: source missing in "
-                                f"{cfg['raw_data']['dir']}; skipped.")
+                    log.warning(f"[aux] {dom}/{fname}: not in raw_data.dir - "
+                                f"skipped.")
                     continue
                 shutil.copy2(src, dst)
-                log.debug(f"{dom}/{fname}: copied from raw_data")
+                log.info(f"[aux] {dom}/{fname}: copied from raw_data")
             elif mode in ("touch", "create_empty"):
                 dst.write_text("")   # touch() would keep existing content
-                log.debug(f"{dom}/{fname}: created empty")
+                log.info(f"[aux] {dom}/{fname}: created empty")
             else:
-                log.warning(f"[clip] {dom}/{fname}: unknown mode '{mode}'; skipped.")
+                log.warning(f"[aux] {dom}/{fname}: unknown mode '{mode}' - skipped.")
 
 
 def stage_clip(cfg, state):
@@ -246,11 +246,11 @@ def stage_clip(cfg, state):
         for layer in ALL_LAYERS:
             key = f"clip:{dom}:{layer}"
             if state.is_done(key):
-                log.debug(f"{_pretty(key)}: already done, skipping.")
+                log.info(f"{_pretty(key)}: kept (already done)")
                 continue
             src = cfg.raw_layer_path(layer)
             if not src.exists():
-                log.warning(f"{_pretty(key)}: raw layer missing ({src}); skipping.")
+                log.warning(f"{_pretty(key)}: raw layer {src.name} missing - skipped.")
                 continue
             out = _clip_output_path(cfg, dom, layer)
             if layer in RASTER_LAYERS:
@@ -289,13 +289,13 @@ def _mask_buildings(cfg, state, after_merge):
     for dom in DOMAIN_NAMES:
         key = f"mask:{dom}:buildings"
         if state.is_done(key):
-            log.debug(f"{_pretty(key)}: already done, skipping.")
+            log.info(f"{_pretty(key)}: kept (already done)")
             continue
         raster = cfg.data_dir(dom) / cfg.output_layer_filename("buildings")
         vector = cfg.data_dir(dom) / cfg.output_layer_filename(mask_layer)
         if not raster.exists() or not vector.exists():
-            log.warning(f"{_pretty(key)}: buildings or {mask_layer} layer "
-                        f"missing; mask skipped.")
+            log.warning(f"{_pretty(key)}: buildings or {mask_layer} missing "
+                        f"- not masked.")
             continue
         tasks.append((key, mask_raster_to_vector_task,
                       (str(raster), str(vector), nodata)))
@@ -308,7 +308,7 @@ def _mask_buildings(cfg, state, after_merge):
 def stage_merge(cfg, state):
     user_layers = cfg["user_data"]["layers"]
     if not user_layers:
-        log.debug("No user layers configured, nothing to merge")
+        log.info("[merge] no user layers - nothing to merge.")
         return
 
     specs = _load_specs(cfg, state)
@@ -335,15 +335,15 @@ def stage_merge(cfg, state):
         for layer, user_src in user_layers.items():
             key = f"merge:{dom}:{layer}"
             if state.is_done(key):
-                log.debug(f"{_pretty(key)}: already done, skipping.")
+                log.info(f"{_pretty(key)}: kept (already done)")
                 continue
             clipped = cfg.data_dir(dom) / "_clipped" / cfg.output_layer_filename(layer)
             out = cfg.data_dir(dom) / cfg.output_layer_filename(layer)
 
             if layer in RASTER_LAYERS:
                 if not clipped.exists():
-                    log.warning(f"{_pretty(key)}: clipped raw raster missing "
-                                f"({clipped.name}); skipping raster merge.")
+                    log.warning(f"{_pretty(key)}: clipped raw raster "
+                                f"{clipped.name} missing - not merged.")
                     continue
                 resampling = res_cfg.get(layer, res_cfg.get("default", "nearest"))
                 force_nodata = (cfg["clip"].get("buildings_nodata")
@@ -354,8 +354,8 @@ def stage_merge(cfg, state):
                                force_nodata)))
             else:
                 if not clipped.exists():
-                    log.warning(f"{_pretty(key)}: clipped raw layer missing "
-                                f"({clipped.name}); merging user layer alone.")
+                    log.warning(f"{_pretty(key)}: clipped raw layer "
+                                f"{clipped.name} missing - user layer only.")
                     clipped = None
                 tasks.append((key, coalesce_task,
                               (str(user_src), str(clipped) if clipped else None,
@@ -395,12 +395,11 @@ def _check_id_columns(cfg):
             except Exception:
                 continue
             if str(col).lower() not in cols:
-                log.warning(
-                    f"{dom}/{layer}: no '{col}' column in {path.name} "
-                    f"(merge.reassign_id expects one). The layer did not go "
-                    f"through the merge step, so the raw source's columns "
-                    f"were kept. Downstream tools that look this layer up by "
-                    f"'{col}' will fail.")
+                # Layers without user data skip merge and keep the raw
+                # source's columns; tools that look them up by `col` fail.
+                log.warning(f"[merge] {dom}/{layer}: no '{col}' column (see "
+                            f"merge.reassign_id) - downstream lookups will "
+                            f"fail.")
 
 
 # ------------------------------
@@ -424,17 +423,26 @@ def _run_parallel(stage, tasks, workers, state):
             try:
                 msg = fut.result()
             except Exception as exc:
-                log.error(f"{_pretty(key)}: FAILED -- {exc}")
+                log.error(f"{_pretty(key)} failed: {exc}")
                 failed += 1
                 continue
-            if msg.startswith("ERROR"):
-                log.error(f"{_pretty(key)}: {msg}")
+            # Task messages are "<LEVEL> <file>: <detail>"; the file name
+            # replaces the layer name, so the line reads "[clip] child/x.shp".
+            first, *more = msg.splitlines() or [""]
+            level, _, text = first.partition(" ")
+            stage_tag, dom = key.split(":")[:2]
+            where = f"[{stage_tag}] {dom}/"
+            if level == "ERROR":
+                log.error(where + text)
                 failed += 1
-            elif msg.startswith("WARNING"):
-                log.warning(f"{_pretty(key)}: {msg}")
+            elif level == "WARNING":
+                log.warning(where + text)
                 state.mark_done(key)   # empty result is a valid outcome
             else:
-                for line in msg.splitlines():
+                verb = "wrote " if stage_tag in ("clip", "merge") else ""
+                log.info(f"[{stage_tag}] {verb}{dom}/"
+                         + (text.rstrip(".") if level == "OK" else first))
+                for line in more:
                     log.debug(f"{_pretty(key)}: {line}")
                 state.mark_done(key)
     if failed:
@@ -446,26 +454,46 @@ def _run_parallel(stage, tasks, workers, state):
 # 5. DRY RUN
 # ------------------------------
 def print_plan(cfg, state, stages):
-    """Validate the config and print what would be done, writing nothing."""
-    log.info("DRY RUN - no files will be written.")
-    log.info(f"Domain input: {cfg['user_data']['domain']}")
+    """Validate the config and print what would be done, writing nothing.
+
+    Same layout as palm2gis's plan: one line per stage, one indented
+    "<action>: <path>" line per output, paths relative to output_dir.
+    """
+    out_dir = cfg.output_dir
+
+    def rel(path):
+        try:
+            return Path(path).relative_to(out_dir)
+        except ValueError:
+            return path
+
+    def item(action, path):
+        log.info(f"      {action}: {rel(path)}")
+
+    log.info("Plan (dry run - nothing written):")
+    log.info(f"  domain input: {cfg['user_data']['domain']}")
     for name in DOMAIN_NAMES:
         dc = cfg["domains"][name]
-        log.info(f"  {name}: grid {dc['grid_size']:g} m, buffer {dc.get('buffer', 0):g} m, "
-                 f"optimize_topology={dc.get('optimize_topology', False)}")
+        log.info(f"  {name}: grid {dc['grid_size']:g} m, buffer "
+                 f"{dc.get('buffer', 0):g} m, optimize_topology="
+                 f"{dc.get('optimize_topology', False)}")
     for stage in stages:
         if stage == "domains":
-            status = "done" if state.is_done("domains") else "pending"
-            log.info(f"[domains] {status} -> domain_child.shp, domain_parent.shp")
+            log.info("  domains:")
+            action = "done" if state.is_done("domains") else "write"
+            for n in ("domain_child.shp", "domain_parent.shp"):
+                item(action, out_dir / n)
         elif stage == "boundary":
             if not cfg["boundary_cleanup"].get("enabled", True):
-                log.info("[boundary] disabled")
+                log.info("  boundary: disabled")
                 continue
-            for dom in cfg["boundary_cleanup"].get("domains", DOMAIN_NAMES):
-                key = f"boundary:{dom}"
-                status = "done" if state.is_done(key) else "pending"
-                log.info(f"[{key}] {status}")
+            doms = cfg["boundary_cleanup"].get("domains", DOMAIN_NAMES)
+            status = ", ".join(
+                f"{d} {'done' if state.is_done(f'boundary:{d}') else 'pending'}"
+                for d in doms)
+            log.info(f"  boundary: {status}")
         elif stage == "templates":
+            log.info("  templates:")
             case = cfg["templates"]["case"] or cfg["project"]["name"]
             names = ([f"{case}_p3d", f"{case}_p3d_N02", f"{case}_p3dr",
                       f"{case}_p3dr_N02", f"pgem_{case}.yaml",
@@ -475,34 +503,36 @@ def print_plan(cfg, state, stages):
                      [f"{case}_p3d", f"{case}_p3dr",
                       f"pgem_{case}.yaml", f"pmeteo_{case}.yaml"])
             for n in names:
-                dst = cfg.output_dir / n
-                status = "exists, kept" if dst.exists() else "pending"
-                log.info(f"[templates:{n}] {status} -> {dst}")
+                dst = out_dir / n
+                item("keep (exists)" if dst.exists() else "write", dst)
         elif stage == "report":
-            log.info(f"[report] always regenerated -> "
-                     f"{cfg['report']['file'] or cfg.output_dir / 'domains_report.txt'}")
+            log.info("  report:")
+            item("write", cfg["report"]["file"]
+                 or out_dir / "domains_report.txt")
         elif stage == "clip":
+            log.info("  clip:")
             for dom in DOMAIN_NAMES:
-                for fname, mode in (cfg["raw_data"].get("aux_files", {}) or {}).items():
+                for fname, mode in (cfg["raw_data"].get("aux_files", {})
+                                    or {}).items():
                     dst = cfg.data_dir(dom) / fname
-                    status = "exists, kept" if dst.exists() else f"pending ({mode})"
-                    log.info(f"[aux:{dom}:{fname}] {status} -> {dst}")
+                    item("keep (exists)" if dst.exists() else mode, dst)
                 for layer in ALL_LAYERS:
                     key = f"clip:{dom}:{layer}"
-                    src = cfg.raw_layer_path(layer)
-                    status = ("done" if state.is_done(key)
-                              else "MISSING SOURCE" if not src.exists() else "pending")
-                    log.info(f"[{key}] {status} -> {_clip_output_path(cfg, dom, layer)}")
+                    action = ("done" if state.is_done(key)
+                              else "MISSING SOURCE"
+                              if not cfg.raw_layer_path(layer).exists()
+                              else "write")
+                    item(action, _clip_output_path(cfg, dom, layer))
         elif stage == "merge":
             if not cfg["user_data"]["layers"]:
-                log.info("[merge] no user layers -> nothing to do")
+                log.info("  merge: no user layers")
                 continue
+            log.info("  merge:")
             for dom in DOMAIN_NAMES:
                 for layer in cfg["user_data"]["layers"]:
                     key = f"merge:{dom}:{layer}"
-                    status = "done" if state.is_done(key) else "pending"
-                    log.info(f"[{key}] {status} -> "
-                             f"{cfg.data_dir(dom) / cfg.output_layer_filename(layer)}")
+                    item("done" if state.is_done(key) else "write",
+                         cfg.data_dir(dom) / cfg.output_layer_filename(layer))
 
 
 # ------------------------------
@@ -545,6 +575,7 @@ def main(argv=None):
     ap.add_argument("--version", action="store_true",
                     help="print the palm_preproc version and exit")
     args = ap.parse_args(argv)
+    t0 = time.monotonic()
 
     from . import __version__
     if args.version:
@@ -563,9 +594,8 @@ def main(argv=None):
         # which looks like a malfunction).
         log.info(f"palm_preproc {__version__}")
         if not sys.stdin.isatty():
-            log.info("non-interactive session: prompts auto-accept the "
-                     "recommended option (child sizing confirmation, "
-                     "processor topology choice)")
+            log.info("non-interactive session: prompts take the recommended "
+                     "option")
 
     _log_header()
 
@@ -587,25 +617,25 @@ def main(argv=None):
         # re-emitting normally printed every header line twice.
         emit_to_file_only(f"palm_preproc {__version__}")
         if not sys.stdin.isatty():
-            emit_to_file_only("non-interactive session: prompts auto-accept "
-                              "the recommended option")
+            emit_to_file_only("non-interactive session: prompts take the "
+                              "recommended option")
         log.debug(f"logging to {cfg.output_dir / 'palm_preproc.log'}")
-
-    overwrite_all = bool(cfg["project"].get("overwrite"))
-    if overwrite_all:
-        log.warning("project.overwrite: true - regenerating ALL outputs "
-                    "(resume state ignored; templates and aux files replaced).")
-    state = State(cfg["project"]["state_file"],
-                  config_hash(cfg.as_plain_dict()),
-                  force=args.force or overwrite_all)
 
     stages = args.stages or cfg["stages"]
     progress("Reading configuration")
-    log_debug("Project: {}", cfg["project"]["name"])
-    log_debug("Stages: {}", " -> ".join(stages))
-    log_debug("Output dir: {}", cfg.output_dir)
-    log_debug("User layers: {}", ", ".join(sorted(cfg["user_data"]["layers"]))
+    log.info(f"output dir: {cfg.output_dir}")
+    log_debug("project: {}", cfg["project"]["name"])
+    log_debug("stages: {}", " -> ".join(stages))
+    log_debug("user layers: {}", ", ".join(sorted(cfg["user_data"]["layers"]))
               or "none (clipped raw data only)")
+
+    overwrite_all = bool(cfg["project"].get("overwrite"))
+    if overwrite_all:
+        log.warning("project.overwrite: existing outputs will be REPLACED "
+                    "(resume state ignored).")
+    state = State(cfg["project"]["state_file"],
+                  config_hash(cfg.as_plain_dict()),
+                  force=args.force or overwrite_all)
 
     if args.dry_run:
         print_plan(cfg, state, stages)
@@ -623,7 +653,7 @@ def main(argv=None):
             log.error(f"Stage {stage} failed: {exc}")
             return 1
 
-    progress("palm_preproc finished OK")
+    progress("palm_preproc finished OK ({:.1f}s)", time.monotonic() - t0)
     return 0
 
 

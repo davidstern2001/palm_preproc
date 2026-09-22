@@ -229,7 +229,9 @@ def clip_raster_task(src, out, spec_dict, resampling_name, snap_to_grid,
             profile.pop(k, None)
         with rasterio.open(out, "w", **profile) as dst_ds:
             dst_ds.write(data)
-        return f"OK {out.name}: cropped in native CRS ({ds.crs}){note}{proj_note}"
+        epsg = ds.crs.to_epsg() if ds.crs else None
+        crs_txt = f"EPSG:{epsg}" if epsg else "native CRS"
+        return f"OK {out.name}: cropped in {crs_txt}{note}{proj_note}"
 
 
 # ------------------------------

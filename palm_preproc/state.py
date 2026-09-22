@@ -36,25 +36,25 @@ class State:
         self.cfg_hash = cfg_hash
         self._d = {"config_hash": cfg_hash, "done": {}, "data": {}}
         if self.path is None:
-            log.info("State: disabled (project.state_file: false); "
-                     "no resume information is kept.")
+            log.info("[state] disabled (project.state_file: false) - no "
+                     "resume.")
             return
         if force:
-            log.info("State: --force given, ignoring previous state.")
+            log.info("[state] --force: previous state ignored.")
             return
         if self.path.exists():
             try:
                 loaded = json.loads(self.path.read_text())
             except Exception as exc:  # corrupt state -> start fresh
-                log.warning(f"State: could not read {self.path} ({exc}); starting fresh.")
+                log.warning(f"[state] could not read {self.path.name} ({exc}) - starting fresh.")
                 return
             if loaded.get("config_hash") != cfg_hash:
-                log.warning("State: config changed since last run; state invalidated.")
+                log.warning("[state] config changed since the last run - starting fresh.")
                 return
             self._d = loaded
             n = len(self._d.get("done", {}))
             if n:
-                log.info(f"State: resuming, {n} step(s) already done.")
+                log.info(f"[state] resuming, {n} step(s) already done.")
 
     # -- step bookkeeping ------------------------------------------------
     def is_done(self, key):

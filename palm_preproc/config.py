@@ -259,9 +259,9 @@ class Config:
         house_path = self._house_defaults_path(raw)
         if house_path and house_path.exists():
             house = yaml.safe_load(house_path.read_text()) or {}
-            log.debug(f"Config: applying site defaults from {house_path}")
+            log.debug(f"[config] site defaults: {house_path}")
         elif house_path:
-            log.debug(f"Config: no site defaults file at {house_path}")
+            log.debug(f"[config] no site defaults file at {house_path}")
 
         self.d = _deep_merge(DEFAULTS, house)
         self.d = _deep_merge(self.d, raw)
@@ -299,9 +299,8 @@ class Config:
         # off into booleans, so this is an easy thing to write by accident.
         sf = d["project"]["state_file"]
         if sf is True:
-            log.warning("Config: project.state_file: true is not a path; "
-                        "using the default. Use `null` for the default, "
-                        "`false` to disable, or quote an explicit path.")
+            log.warning("[config] project.state_file: true is not a path - "
+                        "using the default (null = default, false = off).")
             sf = None
         if sf is None:
             d["project"]["state_file"] = d["project"]["output_dir"] / "palm_preproc_state.json"
@@ -313,8 +312,8 @@ class Config:
         # keys onto the unified user_data section.
         legacy = d.pop("inputs", None)
         if legacy:
-            log.warning("Config: the 'inputs:' section is deprecated; use "
-                        "'user_data:' (dir/domain/layers, like raw_data).")
+            log.warning("[config] 'inputs:' is deprecated - use 'user_data:' "
+                        "(dir/domain/layers).")
             if legacy.get("user_data_dir"):
                 d["user_data"]["dir"] = legacy["user_data_dir"]
             if legacy.get("domain"):
@@ -398,11 +397,9 @@ class Config:
             raise ConfigError(f"Unknown stage(s): {sorted(unknown)}; valid: {STAGES}")
         ratio = d["domains"]["parent"]["grid_size"] / d["domains"]["child"]["grid_size"]
         if d["domains"]["align_child_to_parent"] and abs(ratio - round(ratio)) > 1e-9:
-            log.warning(
-                f"parent/child grid ratio {ratio:g} is not an integer; PALM "
-                f"nesting normally requires an integer ratio. Child-to-parent "
-                f"alignment will be skipped."
-            )
+            # PALM nesting normally requires an integer ratio.
+            log.warning(f"[config] parent/child grid ratio {ratio:g} is not "
+                        f"an integer - child alignment skipped.")
 
     # -- convenience accessors -------------------------------------------
     def __getitem__(self, key):

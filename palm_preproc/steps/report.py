@@ -231,10 +231,10 @@ def write_domain_report(child, parent, cfg, out_path=None, topology=None):
     out_path.write_text("\n".join(L))
 
     for msg in warnings:
-        log.warning(f"report: {msg}")
+        log.warning(f"[report] {msg}")
     for msg in errors:
-        log.error(f"report: {msg}")
-    log.debug(f"written: {out_path}")
+        log.error(f"[report] {msg}")
+    log.info(f"[report] wrote {out_path.name}")
     if errors:
         raise RuntimeError(
             f"Nesting validation failed with {len(errors)} error(s); "

@@ -196,8 +196,10 @@ class DomainSpec:
             crs=self.crs,
         )
         if output_crs is not None and str(output_crs) != str(self.crs):
-            log.info(f"[{self.name}] reprojecting rectangle to {output_crs} "
-                     f"(rotated quadrilateral; do NOT take .total_bounds downstream)")
+            # The result is a rotated quadrilateral: never take its
+            # .total_bounds downstream.
+            log.debug(f"[domains] {self.name}: rectangle reprojected to "
+                      f"{output_crs}")
             gdf = gdf.to_crs(output_crs)
         return gdf
 
@@ -216,12 +218,12 @@ def _size_axes(width_pts, height_pts, stride, dcfg):
         base_w = snap_up(width_pts, stride)
         base_h = snap_up(height_pts, stride)
         base_score = joint_topology_score(base_w, base_h, dcfg.get("topology_opt", True))
-        log.debug(f"topology-aware sizing: baseline {base_w}x{base_h} "
+        log.debug(f"[domains] topology-aware sizing: baseline {base_w}x{base_h} "
                  f"(score {base_score}) -> chosen {w}x{h} (score {score})")
         pairs = valid_pairs(w, h, dcfg.get("topology_opt", True))
         if pairs:
             ex = max(pairs, key=lambda p: p[0] * p[1])
-            log.debug(f"sample decomposition: npex={ex[0]} npey={ex[1]} "
+            log.debug(f"[domains] sample decomposition: npex={ex[0]} npey={ex[1]} "
                      f"(cores={ex[0]*ex[1]}, cells/core={ex[2]}x{ex[3]})")
         return w, h, score
     w = snap_up(width_pts, stride)
@@ -250,13 +252,13 @@ def make_child_spec(bounds, child_cfg, aligned_crs, parent_grid_size=None,
             stride = _lcm(stride, int(round(ratio)))
             align_grid = parent_grid_size
         else:
-            log.warning(f"[domains] child: non-integer parent/child grid ratio {ratio:g}; "
-                        f"skipping nesting alignment.")
+            log.warning(f"[domains] child: parent/child grid ratio {ratio:g} "
+                        f"is not an integer - alignment skipped.")
 
     minx, miny, maxx, maxy = bounds
     width = (maxx - minx) + 2 * buffer
     height = (maxy - miny) + 2 * buffer
-    log.debug(f"child: input bounds {maxx-minx:.1f} x {maxy-miny:.1f} m, "
+    log.debug(f"[domains] child: input bounds {maxx-minx:.1f} x {maxy-miny:.1f} m, "
              f"buffer {buffer:g} m/side, grid {dx:g} m, stride {stride} pts")
 
     w_pts, h_pts, score = _size_axes(width / dx, height / dx, stride, child_cfg)
@@ -288,16 +290,14 @@ def _confirm_optimized_child(chosen, baseline, child_cfg, interactive_override):
     w, h, score = chosen
     bw, bh = baseline
     bscore = joint_topology_score(bw, bh, child_cfg.get("topology_opt", True))
-    log.info(f"child: optimization grew the domain "
-             f"{bw}x{bh} -> {w}x{h} pts "
-             f"(+{w - bw} x +{h - bh}; joint score {bscore} -> {score})")
+    log.info(f"[domains] child: topology optimization grew it {bw}x{bh} -> "
+             f"{w}x{h} pts (score {bscore} -> {score})")
     interactive = (interactive_override if interactive_override is not None
                    else sys.stdin.isatty())
     if not interactive:
-        log.info(f"child: non-interactive session - auto-accepted the "
-                 f"optimized size {w}x{h} (baseline was {bw}x{bh}; set "
-                 f"domains.child.optimize_topology: false to keep the "
-                 f"baseline, or confirm_optimized: false to silence).")
+        # domains.child.optimize_topology: false keeps the baseline.
+        log.info(f"[domains] child: optimized size {w}x{h} auto-accepted "
+                 f"(non-interactive)")
         return chosen
     while True:
         try:
@@ -308,7 +308,7 @@ def _confirm_optimized_child(chosen, baseline, child_cfg, interactive_override):
         if raw in ("", "y", "yes"):
             return chosen
         if raw in ("n", "no"):
-            log.info(f"child: using the baseline size {bw}x{bh}")
+            log.info(f"[domains] child: using the baseline size {bw}x{bh}")
             return bw, bh, bscore
         log.warning(f"Invalid answer '{raw}'; y or n.")
 
@@ -329,7 +329,7 @@ def make_parent_spec(child, parent_cfg, aligned_crs, strict=True):
     oy = round(math.floor((child.origin_y - buffer) / dx) * dx, 6)
     req_w_pts = (child.maxx + buffer - ox) / dx
     req_h_pts = (child.maxy + buffer - oy) / dx
-    log.debug(f"parent: buffer {buffer:g} m around child, grid {dx:g} m, "
+    log.debug(f"[domains] parent: buffer {buffer:g} m around child, grid {dx:g} m, "
              f"stride {stride} pts")
 
     w_pts, h_pts, score = _size_axes(req_w_pts, req_h_pts, stride, parent_cfg)
@@ -341,7 +341,7 @@ def make_parent_spec(child, parent_cfg, aligned_crs, strict=True):
 
 
 def _log_spec(s):
-    log.info(f"{s.name}: {s.width_pts} x {s.height_pts} pts @ {s.grid_size:g} m, "
+    log.info(f"[domains] {s.name}: {s.width_pts} x {s.height_pts} pts @ {s.grid_size:g} m, "
              f"PALM nx={s.nx} ny={s.ny}, origin ({s.origin_x:.2f}, {s.origin_y:.2f})")
 
 
@@ -374,10 +374,10 @@ def check_nesting(child, parent, strict=True, tol=1e-6):
                 f"child {label} ({ext:.6f} m) is not a multiple of the "
                 f"parent grid ({parent.grid_size:g} m)")
     if not problems:
-        log.debug("nesting: child aligns with the parent grid, OK")
+        log.debug("[domains] nesting: child aligns with the parent grid")
         return
     for p in problems:
-        log.error(f"nesting: {p}")
+        log.error(f"[domains] nesting: {p}")
     if strict:
         raise NestingError(
             "Nesting geometry invalid: " + "; ".join(problems) +
@@ -386,8 +386,8 @@ def check_nesting(child, parent, strict=True, tol=1e-6):
             "configuration (or set domains.strict_nesting: false to only "
             "warn)."
         )
-    log.warning("nesting: continuing despite the problems above "
-                "(strict_nesting: false).")
+    log.warning("[domains] nesting: continuing anyway (strict_nesting: "
+                "false).")
 
 
 # ------------------------------
@@ -433,7 +433,7 @@ def _cli():
     from pathlib import Path
     Path(a.output).parent.mkdir(parents=True, exist_ok=True)
     out_gdf.to_file(a.output)
-    log.info(f"Written: {a.output}")
+    log.info(f"[domains] wrote {a.output}")
 
 
 if __name__ == "__main__":

@@ -143,10 +143,9 @@ def _mean_abs_rooftop_height(cfg, domain_name):
         bld_nodata = bds.nodata
 
     if dem.shape != bld.shape:
-        log.warning(f"{domain_name}: DEM {dem.shape} and buildings "
-                    f"{bld.shape} rasters are not grid-aligned; cannot use "
-                    f"absolute rooftop height (is clip.snap_rasters_to_grid "
-                    f"enabled?).")
+        log.warning(f"[templates] {domain_name}: DEM {dem.shape} and buildings "
+                    f"{bld.shape} are not grid-aligned - no absolute rooftop "
+                    f"height (check clip.snap_rasters_to_grid).")
         return None
 
     # Domain datum: lowest VALID terrain point (nodata / non-finite excluded).
@@ -207,24 +206,22 @@ def _auto_nz(cfg, spec):
             h = _max_building_height(cfg, spec.name)
             basis = "max relative building height (DEM unavailable/unaligned)"
         if h is None:
-            log.warning(f"{spec.name}: could not determine building height "
-                        f"for nz auto-calculation (buildings raster missing "
-                        f"or empty); nz left as a placeholder.")
+            log.warning(f"[templates] {spec.name}: no building height for "
+                        f"nz (buildings raster missing or empty) - nz left "
+                        f"as a placeholder.")
             return None
         nz_raw = factor * h / dz
         nz = snap_up(nz_raw, stride)
-        log.info(f"{spec.name}: nz auto-calculated = {nz} (dz*nz = "
-                 f"{factor:g} x {basis} {h:.1f} m -> "
-                 f"{nz_raw:.1f} pts snapped up to a multiple of {stride} "
-                 f"for multigrid)")
+        # Snapped up to a multiple of `stride` for the multigrid solver.
+        log.info(f"[templates] {spec.name}: nz = {nz} ({factor:g} x {basis} "
+                 f"{h:.1f} m, {nz_raw:.1f} pts snapped to x{stride})")
         return nz
     else:
         target = float(tv.get("parent_target_height_m", 2000.0))
         nz_raw = target / dz
         nz = snap_up(nz_raw, stride)
-        log.info(f"{spec.name}: nz auto-calculated = {nz} (dz*nz ~= "
-                 f"{target:g} m -> {nz_raw:.1f} pts snapped up to a "
-                 f"multiple of {stride} for multigrid)")
+        log.info(f"[templates] {spec.name}: nz = {nz} ({target:g} m, "
+                 f"{nz_raw:.1f} pts snapped to x{stride})")
         return nz
 
 
@@ -273,8 +270,8 @@ def _load_seasonal(cfg):
         try:
             file_cfg = yaml.safe_load(path.read_text()) or {}
         except Exception as e:
-            log.warning(f"seasonal: cannot parse {path}: {e}; "
-                        f"seasonal temperatures not applied.")
+            log.warning(f"[templates] seasonal: cannot parse {path.name}: "
+                        f"{e} - not applied.")
             file_cfg = {}
     return _merge_seasonal(file_cfg, _cfg_get(cfg, "seasonal") or {})
 
@@ -285,9 +282,8 @@ def _seasonal_key(scfg, canonical, deprecated):
     if scfg.get(canonical) is not None:
         return scfg.get(canonical)
     if scfg.get(deprecated) is not None:
-        log.warning(f"seasonal: key '{deprecated}' is deprecated; "
-                    f"rename it to '{canonical}' (canonical PALM/PALM-GeM "
-                    f"name). Values are used unchanged.")
+        log.warning(f"[templates] seasonal: '{deprecated}' is now "
+                    f"'{canonical}' - the old name still works for now.")
         return scfg.get(deprecated)
     return None
 
@@ -311,14 +307,14 @@ def _seasonal_values(cfg, origin_time):
         return empty
     m = re.match(r"\s*\d{4}-(\d{2})-\d{2}", str(origin_time))
     if not m:
-        log.warning(f"seasonal: cannot read a month from origin_time "
-                    f"'{origin_time}'; seasonal temperatures not applied.")
+        log.warning(f"[templates] seasonal: no month in origin_time "
+                    f"'{origin_time}' - not applied.")
         return empty
     month_idx = int(m.group(1)) - 1          # 0-based Jan..Dec
     stat = str(scfg.get("statistic", "ave")).lower()
     if stat not in _SEASONAL_STATS:
-        log.warning(f"seasonal.statistic '{stat}' not one of "
-                    f"{_SEASONAL_STATS}; using 'ave'.")
+        log.warning(f"[templates] seasonal.statistic '{stat}' not one of "
+                    f"{_SEASONAL_STATS} - using 'ave'.")
         stat = "ave"
 
     def month_value(table, what):
@@ -331,8 +327,9 @@ def _seasonal_values(cfg, origin_time):
         if table is None:
             return None
         if not isinstance(table, (list, tuple)) or len(table) != 12:
-            log.warning(f"seasonal: {what} needs 12 monthly values "
-                        f"(Jan..Dec); got {table!r}. Not applied.")
+            got = len(table) if isinstance(table, (list, tuple)) else repr(table)
+            log.warning(f"[templates] seasonal: {what} needs 12 monthly "
+                        f"values, got {got} - not applied.")
             return None
         return float(table[month_idx])
 
@@ -342,9 +339,8 @@ def _seasonal_values(cfg, origin_time):
                             "deep_soil_temperature_c", "p3d_temperature_c")
                 if k in scfg]
     if old_keys:
-        log.warning(f"seasonal: found old Celsius-schema key(s) {old_keys}; "
-                    f"tables are now in KELVIN with _k suffixes "
-                    f"(e.g. water_temperature_k) - these entries are ignored.")
+        log.warning(f"[templates] seasonal: old Celsius key(s) {old_keys} "
+                    f"ignored - tables are now in KELVIN (*_k).")
     for type_id, table in (_seasonal_key(scfg, "water_pars_temp",
                                      "water_temperature_k") or {}).items():
         k = month_value(table, f"water_pars_temp[{type_id}]")
@@ -354,10 +350,10 @@ def _seasonal_values(cfg, origin_time):
     used_ph = sorted(ph & set(out["water"]))
     if used_ph and not _WARNED.get("placeholder_water"):
         _WARNED["placeholder_water"] = True   # once per run, not per domain
-        log.warning(f"seasonal: water type(s) {used_ph} still use placeholder "
-                    f"year-round tables (TODO) - replace them with measured "
-                    f"monthly data in seasonal.yaml and remove the ids from "
-                    f"placeholder_water_types.")
+        # Replace them with measured monthly data in seasonal.yaml and drop
+        # the ids from placeholder_water_types.
+        log.warning(f"[templates] seasonal: water type(s) {used_ph} still use "
+                    f"placeholder tables (TODO).")
 
     soil = _seasonal_key(scfg, "soil_temperature", "soil_temperature_k")
     if soil is not None:
@@ -371,8 +367,8 @@ def _seasonal_values(cfg, origin_time):
             if len(layer_row) == 8:
                 layers = [float(v) for v in layer_row]
             else:
-                log.warning(f"seasonal: soil_temperature month rows need "
-                            f"8 layer values; got {len(layer_row)}.")
+                log.warning(f"[templates] seasonal: soil_temperature rows "
+                            f"need 8 layers, got {len(layer_row)}.")
         if layers:
             out["soil"] = list(layers)
 
@@ -402,8 +398,8 @@ def _seasonal_values(cfg, origin_time):
             if len(layer_row) == 8:
                 layers = [float(v) for v in layer_row]
             else:
-                log.warning(f"seasonal: soil_moisture month rows need "
-                            f"8 layer values; got {len(layer_row)}.")
+                log.warning(f"[templates] seasonal: soil_moisture rows "
+                            f"need 8 layers, got {len(layer_row)}.")
         if layers:
             out["soil_moisture"] = layers
 
@@ -472,9 +468,8 @@ def _parse_hours(value):
     m = re.match(r"\s*([0-9.]+)\s*(h|hr|hours?|d|days?|m|min|minutes?|s|secs?|seconds?)\s*$",
                  s, re.I)
     if not m:
-        log.warning(f"templates.values.length: cannot parse duration "
-                    f"{value!r}; expected a number of hours or e.g. '29 h', "
-                    f"'1 d'. Leaving unset.")
+        log.warning(f"[templates] templates.values.length {value!r} is not "
+                    f"a duration (e.g. 29, '29 h', '1 d') - left unset.")
         return None
     n, unit = float(m.group(1)), m.group(2).lower()[0]
     return {"h": n, "d": n * 24.0, "m": n / 60.0, "s": n / 3600.0}[unit]
@@ -493,7 +488,8 @@ def build_context(spec, cfg, other=None):
     npex = tv.get(f"npex_{name}")
     npey = tv.get(f"npey_{name}")
     if not (npex and npey):
-        log.warning(f"{name}: npex/npey not resolved, left as placeholders")
+        log.warning(f"[templates] {name}: npex/npey not resolved - left as "
+                    f"placeholders.")
         npex = npey = None
 
     nz = tv.get(f"nz_{name}") or tv.get("nz")
@@ -554,7 +550,7 @@ def _resolve_topology(child, parent, cfg, nested, state=None):
                                                 chosen["parent"]["npey"])
         tv["npex_child"], tv["npey_child"] = (chosen["child"]["npex"],
                                               chosen["child"]["npey"])
-        log.info(f"topology: parent npex={tv['npex_parent']} "
+        log.info(f"[topology] parent npex={tv['npex_parent']} "
                  f"npey={tv['npey_parent']} ({chosen['parent']['cores']}), "
                  f"N02 npex={tv['npex_child']} npey={tv['npey_child']} "
                  f"({chosen['child']['cores']}), sum_cpu={chosen['sum']}")
@@ -577,7 +573,7 @@ def _resolve_topology(child, parent, cfg, nested, state=None):
             return
         chosen = configs[idx]
         tv[f"npex_{name}"], tv[f"npey_{name}"] = chosen["npex"], chosen["npey"]
-        log.info(f"topology: {name} npex={chosen['npex']} "
+        log.info(f"[topology] {name} npex={chosen['npex']} "
                  f"npey={chosen['npey']} ({chosen['cores']} cores)")
     _persist_topology(tv, state)
 
@@ -753,12 +749,12 @@ def make_p3dr(p3d_text):
 # ------------------------------
 def _write(out_path, text, overwrite):
     if out_path.exists() and not overwrite:
-        log.debug(f"{out_path.name}: exists, kept")
+        log.info(f"[templates] kept (exists): {out_path.name}")
         return
     out_path.write_text(text)
     left = len(_PLACEHOLDER_RE.findall(text)) + text.count("<>")
-    note = f" ({left} placeholder(s) left for manual fill)" if left else ""
-    log.debug(f"written: {out_path.name}{note}")
+    note = f" ({left} placeholder(s) to fill)" if left else ""
+    log.info(f"[templates] wrote {out_path.name}{note}")
 
 
 def fill_submit(text, cfg, case, total_cores):
@@ -815,8 +811,7 @@ def write_templates(child, parent, cfg, state=None):
     if write_submit:
         targets.append(f"submit_{case}.sh")
     if not overwrite and all((out_dir / t).exists() for t in targets):
-        log.debug("all generated files exist, nothing to do "
-                  "(templates.overwrite: true to regenerate)")
+        log.info("[templates] kept (all files exist)")
         return
 
     _resolve_topology(child, parent, cfg, nested, state)
@@ -833,10 +828,10 @@ def write_templates(child, parent, cfg, state=None):
         var = "cyclic_" if tcfg.get("cyclic") else ""
         if var and not _WARNED.get("cyclic"):
             _WARNED["cyclic"] = True
-            log.warning("templates.cyclic: the cyclic p3d templates are a "
-                        "STARTING SKELETON (TODO) - review the flow driving "
-                        "(ug/vg_surface, dp_external/dpdxy), y_shift and "
-                        "disturbance settings before a production run.")
+            # Review the flow driving (ug/vg_surface, dp_external/dpdxy),
+            # y_shift and disturbances before a production run.
+            log.warning("[templates] cyclic p3d is a STARTING SKELETON "
+                        "(TODO) - review flow driving and y_shift.")
         p3d_parent = fill_p3d(read(f"template_{var}nested_p3d"), pctx,
                               child_ctx=cctx)
         p3d_child = fill_p3d(read(f"template_{var}nested_p3d_N02"), cctx)
@@ -862,10 +857,10 @@ def write_templates(child, parent, cfg, state=None):
         var = "cyclic_" if tcfg.get("cyclic") else ""
         if var and not _WARNED.get("cyclic"):
             _WARNED["cyclic"] = True
-            log.warning("templates.cyclic: the cyclic p3d template is a "
-                        "STARTING SKELETON (TODO) - review the flow driving "
-                        "(ug/vg_surface, dp_external/dpdxy), y_shift and "
-                        "disturbance settings before a production run.")
+            # Review the flow driving (ug/vg_surface, dp_external/dpdxy),
+            # y_shift and disturbances before a production run.
+            log.warning("[templates] cyclic p3d is a STARTING SKELETON "
+                        "(TODO) - review flow driving and y_shift.")
         p3d = fill_p3d(read(f"template_{var}p3d"), ctx)
         _write(out_dir / f"{case}_p3d", p3d, overwrite)
         _write(out_dir / f"{case}_p3dr", make_p3dr(p3d), overwrite)
@@ -907,6 +902,5 @@ def write_templates(child, parent, cfg, state=None):
     if nz_unresolved:
         missing.append("nz_" + "/nz_".join(nz_unresolved))
     if missing:
-        log.warning(f"values not set in templates.values "
-                    f"({', '.join(missing)}); corresponding placeholders "
-                    f"remain for manual filling.")
+        log.warning(f"[templates] not set in templates.values: "
+                    f"{', '.join(missing)} - placeholders left.")

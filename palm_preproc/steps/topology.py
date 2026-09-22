@@ -86,7 +86,7 @@ def best_per_node_group(configs, node_cpus, nested=True):
             best[group] = (rank, c)
     out = [v[1] for _, v in sorted(best.items())]
     if len(out) < len(configs):
-        log.debug(f"best-per-node-group: {len(configs)} -> {len(out)} "
+        log.debug(f"[topology] best-per-node-group: {len(configs)} -> {len(out)} "
                   f"(one per whole node count)")
     return out
 
@@ -103,7 +103,7 @@ def filter_by_nodes(configs, node_cpus, min_nodes=None, max_nodes=None,
     kept = [c for c in configs
             if (not min_nodes or nodes(c) >= min_nodes)
             and (not max_nodes or nodes(c) <= max_nodes)]
-    log.debug(f"node limits [{min_nodes or '-'}, {max_nodes or '-'}] @ "
+    log.debug(f"[topology] node limits [{min_nodes or '-'}, {max_nodes or '-'}] @ "
               f"{node_cpus} cpus/node: {len(kept)}/{len(configs)} kept")
     return kept
 
@@ -129,7 +129,7 @@ def dedupe_by_cores(configs, nested=True):
             best[k] = c
     out = sorted(best.values(), key=cores)
     if len(out) < len(configs):
-        log.debug(f"{len(configs)} topologies collapsed to {len(out)} "
+        log.debug(f"[topology] {len(configs)} topologies collapsed to {len(out)} "
                   f"(one per node count)")
     return out
 
@@ -246,7 +246,7 @@ def choose_topology(configs, recommended, mode="ask", node_cpus=None,
           "auto" -> always take the recommendation silently.
     """
     if not configs:
-        log.warning("no valid processor topology found "
+        log.warning("[topology] no valid processor topology found "
                     "(try opt=False, as in --no_opt)")
         return None
     interactive = (interactive_override if interactive_override is not None
@@ -260,9 +260,11 @@ def choose_topology(configs, recommended, mode="ask", node_cpus=None,
                     f"N02: {_fmt_single(c['child'])}"
                     if isinstance(c, dict) and "parent" in c
                     else _fmt_single(c))
-            log.info(f"topology auto-selected ({why}): {desc} "
-                     f"- {len(configs)} valid option(s) were available; pin "
-                     f"npex/npey in templates.values to choose explicitly.")
+            # Pin npex/npey in templates.values to choose explicitly; the
+            # chosen layout is logged by the caller.
+            log.info(f"[topology] auto-selected ({why}) from "
+                     f"{len(configs)} valid option(s)")
+            log.debug(f"[topology] {desc}")
         return recommended
     (_log_nested_table if nested else _log_single_table)(
         configs, recommended, node_cpus)

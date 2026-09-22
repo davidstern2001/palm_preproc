@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.1
+
+**Logging - same style as palm2gis and palm_postproc**
+
+- Every detail line carries a `[stage]` tag: `[config]`, `[state]`,
+  `[domains]`, `[aux]`, `[clip]`, `[mask]`, `[merge]`, `[boundary]`,
+  `[topology]`, `[templates]`, `[report]` (was a mix of `Config:`,
+  `State:`, `child:`, `seasonal:`, `topology:` and untagged lines).
+- Written outputs are logged at info (`[clip] wrote child/roofs.shp:
+  4/4 features`, `[templates] wrote test_p3d`); outputs from an earlier
+  run as `kept (exists)` / `kept (already done)`.
+- Long messages shortened (topology auto-selection, nz auto-calculation,
+  seasonal placeholders, cyclic templates, reassign_id); the details moved
+  to code comments or debug.
+- The dry-run plan uses palm2gis's layout: one line per stage, one
+  `<action>: <path>` line per output, paths relative to output_dir.
+- `output dir:` is logged at info; the final line reports the run time.
+
 ## 1.2.0
 
 **Logging**
