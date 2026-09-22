@@ -50,7 +50,7 @@ raw_data:
   layers:
     dem:       dem.tif
     buildings: buildings.tif
-    landcover: landcover.shp
+    landcover: landcover.shp         #landcover.shp is from landuse data, landcover.gpkg is from LIDAR data
     roofs:     roofs.shp
     walls:     walls.shp
     trees:     trees.shp
