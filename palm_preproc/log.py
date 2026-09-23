@@ -37,6 +37,17 @@ _LEVEL_TAGS = {
 }
 
 
+# Rewrites setting names in every message into the vocabulary of the
+# config being run (see palm_preproc.layout.to_new_names). None = unchanged.
+_rename = None
+
+
+def set_message_names(func):
+    """Install (or with None, remove) the setting-name rewrite."""
+    global _rename
+    _rename = func
+
+
 class _PalmFormatter(logging.Formatter):
     def __init__(self, use_colour=True, log_datetime=False):
         super().__init__()
@@ -49,6 +60,8 @@ class _PalmFormatter(logging.Formatter):
     def format(self, record):
         ts = self._c(_GREY, self.formatTime(record, self._datefmt))
         msg = record.getMessage()
+        if _rename is not None:
+            msg = _rename(msg)
 
         if record.levelno >= logging.WARNING:
             tag, colour = _LEVEL_TAGS.get(record.levelno,

@@ -80,7 +80,7 @@ successfully. That means the environment's PROJ database (`proj.db`) is stale
 or mismatched — commonly a leftover `PROJ_DATA`/`PROJ_LIB` variable, or conda
 and pip both supplying GDAL/PROJ. The pipeline itself is unaffected, because it
 reads the CRS embedded in your data files rather than resolving EPSG codes; only
-`crs.domain_output` reprojection needs the database and would fail. Fix it by
+`input.domain_crs` reprojection needs the database and would fail. Fix it by
 clearing the stale variable or reinstalling GDAL/PROJ from a single source.
 
 Useful variations:
@@ -108,9 +108,9 @@ DATA_user/   (optional) your own landcover/roofs/walls/trees.shp and/or building
 
 ## Data you provide, files you get back
 
-**Input formats.** Vector layers may be in any format GeoPandas/GDAL reads — Shapefile, GeoPackage (`.gpkg`), GeoJSON, etc. — set per layer in `raw_data.layers` / `user_data.layers` (e.g. `landcover: landcover.gpkg`). The pipeline always **writes** the clipped vector outputs as Shapefiles, because PALM-GeM consumes Shapefiles; the conversion happens after clipping, on the much smaller domain-sized data. GeoPackage inputs must be single-layer.
+**Input formats.** Vector layers may be in any format GeoPandas/GDAL reads — Shapefile, GeoPackage (`.gpkg`), GeoJSON, etc. — set per layer in `input.raw_data.layers` / `input.user_data.layers` (e.g. `landcover: landcover.gpkg`). The pipeline always **writes** the clipped vector outputs as Shapefiles, because PALM-GeM consumes Shapefiles; the conversion happens after clipping, on the much smaller domain-sized data. GeoPackage inputs must be single-layer.
 
-**Inputs.** `DATA_raw` is the permanent whole-city source dataset — it is only ever read, never modified. `DATA_user` holds anything project-specific: the area of interest (either an explicit `domain.shp`, or derived from the extent of one of your layers via `user_data.domain_from`), plus any higher-quality layers you want to override the raw data with inside that area. A user layer participates simply by existing; set it to `false` to ignore a file that's present, or to a path to use a file elsewhere.
+**Inputs.** `DATA_raw` is the permanent whole-city source dataset — it is only ever read, never modified. `DATA_user` holds anything project-specific: the area of interest (either an explicit `domain.shp`, or derived from the extent of one of your layers via `input.user_data.domain_from`), plus any higher-quality layers you want to override the raw data with inside that area. A user layer participates simply by existing; set it to `false` to ignore a file that's present, or to a path to use a file elsewhere.
 
 **The layout at a glance.** Everything hangs off `project.root`; `DATA_raw`
 is a sibling of the per-project directories, shared by all of them:
@@ -170,7 +170,7 @@ your layers in it, copy `template.yaml` to `config/<project>.yaml`, point
 | `<case>_p3dr`, `<case>_p3dr_N02` | templates | Restart namelists — identical, but `initializing_actions` is switched to reading restart data |
 | `pgem_<case>.yaml`, `pgem_<case>_N02.yaml` | templates | Static-driver generator configs (dx/dy/dz, nx/ny, cent_x/cent_y, origin_time) |
 | `pmeteo_<case>.yaml`, `pmeteo_<case>_N02.yaml` | templates | palm_meteo configs (dz, nz, origin_time, length, WRF paths via `wrf_date`) |
-| `submit_<case>.sh` | templates | `palmrun` submit script; `-X` (total MPI processes, parent + children) and `-T` come from the chosen topology, so it always matches the `_p3d` files. Wall-clock limit, queue, `-c` and `-a` from `templates.values`; disable with `templates.submit: false` |
+| `submit_<case>.sh` | templates | `palmrun` submit script; `-X` (total MPI processes, parent + children) and `-T` come from the chosen topology, so it always matches the `_p3d` files. Wall-clock limit, queue, `-c` and `-a` from `cluster:`; disable with `templates.submit: false` |
 | `domains_report.txt` | report | Case summary, nesting validation, `&nesting_parameters`, a summary table, and a provenance header (version, config path, config hash, command line) |
 | `palm_preproc.log` | — | Full run log, including the topology and child-sizing decisions. Move it with `--log-file PATH`, disable with `--log-file ''` |
 | `palm_preproc_state.json` | — | Resume state |
@@ -192,7 +192,7 @@ DEFAULTS (hardcoded)  →  defaults/default.yaml  →  config/<project>.yaml
 Later layers override earlier ones, and the merge is **deep** — you can override a single nested key (say `domains.parent.buffer`) without restating the rest of the block.
 
 - **`defaults/default.yaml`** is the baseline for *every* project on this machine. Put things here that rarely change between projects: buffers, resampling methods, `raw_fill` rules, cluster facts (`node_cpus`, node limits), boundary-cleanup settings, `nz` auto-calc factors, the stage list. The run-configuration skeletons it points at live in `defaults/templates/`.
-- **`config/<project>.yaml`** then only needs to state what's genuinely project-specific: name, root, output directory, your `user_data` layers, simulation time (`origin_time`, `length`, `wrf_date`), and any deliberate override of a default.
+- **`config/<project>.yaml`** then only needs to state what's genuinely project-specific: name, root, output directory, your `input.user_data` layers, simulation time (`run.origin_time`, `run.length`, `run.wrf_date`), and any deliberate override of a default.
 
 To skip the site defaults for one project use `project.no_defaults: true`; to point at a different defaults file use `project.defaults_file: <path>`. The fully-commented `template.yaml` documents every setting and works as a standalone config too.
 
@@ -206,29 +206,27 @@ project:
   root: /home/stern/palm/DATA        # base for all relative paths below
   output_dir: ./my_project
 
-user_data:
-  dir: ./my_project/DATA_user
-  domain: null                       # null → derive the area of interest…
-  domain_from: landcover             #   …from this layer's full extent
-  layers:
-    buildings: buildings.tif
-    landcover: landcover.shp
-    roofs:     roofs.shp
-    walls:     walls.shp
-    trees:     trees.shp
+input:
+  user_data:
+    dir: ./my_project/DATA_user
+    domain: null                     # null → derive the area of interest…
+    domain_from: landcover           #   …from this layer's full extent
+    layers:
+      buildings: buildings.tif       # only what differs from the defaults
 
 domains:
   parent:
     buffer: 400.0                    # metres around the final child (PALM convention: 400–500 m)
 
-templates:
-  values:
-    origin_time: "2023-08-23 19:00:00"   # UTC
-    length: 29                            # simulation length [h]
-    wrf_date: "2023-08-23"                # WRF path date
+run:
+  origin_time: "2023-08-23 19:00:00" # UTC
+  length: '29 h'
+  wrf_date: "2023-08-23"
 ```
 
 Because defaults are inherited deeply, a project config really can be this short — every other setting comes from `defaults/default.yaml`.
+
+The layout is shared with palm2gis and palm_postproc: `project`, `input`, `domains`, `run`, `cluster`, the output blocks (`templates`, `report`), and `advanced` for the clip/merge/topology internals. Cluster facts (`cluster.user`, `queue`, `walltime`, `node_cpus`) normally live in `defaults/default.yaml`, not per project. Configs in the pre-1.3 layout (`crs`, `user_data`, `raw_data`, `clip`, `merge`, `templates.values`, `stages`) still load unchanged, and either layout may be used in `defaults/default.yaml`.
 
 ---
 
@@ -238,7 +236,7 @@ Because defaults are inherited deeply, a project config really can be this short
 
 Given the area of interest, the child rectangle is built with no buffer and the parent with a buffer around the *final* child (default 400–500 m, enough to keep boundary effects away from the region of interest). Both are snapped up to PALM-friendly sizes.
 
-With `optimize_topology: true`, sizing is **topology-aware**: rather than just snapping up, the stage searches a small window (up to `topology_max_overhead`, default +10 % per axis) for the grid size that admits the most valid processor decompositions — a "joint score" equal to the number of valid `(npex, npey)` layouts that size allows. Preferring a high-scoring size here means the topology chooser in the `templates` stage has many good options later. When optimization grows the *child* beyond the plain snap, you're asked to confirm interactively (`confirm_optimized: true`); in batch runs it proceeds automatically.
+With `advanced.cpu_topology.optimize_parent` / `optimize_child`, sizing is **topology-aware**: rather than just snapping up, the stage searches a small window (up to `advanced.cpu_topology.max_overhead`, default +10 % per axis) for the grid size that admits the most valid processor decompositions — a "joint score" equal to the number of valid `(npex, npey)` layouts that size allows. Preferring a high-scoring size here means the topology chooser in the `templates` stage has many good options later. When optimization grows the *child* beyond the plain snap, you're asked to confirm interactively (`advanced.cpu_topology.confirm_optimized`); in batch runs it proceeds automatically.
 
 `align_child_to_parent: true` places the child origin and extent exactly on the parent grid. If the result is off the parent lattice, `strict_nesting: true` **aborts** (see [Strict nesting](#things-worth-knowing)); set it to `false` to downgrade to a warning.
 
@@ -253,7 +251,7 @@ Where you supply a layer, it takes priority inside the area of interest and the 
 - **`difference`** (default) cuts raw geometry along the priority boundary, so the seam has neither gaps nor overlaps. Per-layer `raw_fill` controls how raw is removed: `coverage` (cut raw exactly along your geometry — right for wall-to-wall layers like landcover) or `footprint` (drop *all* raw inside the domain footprint — right for buildings/roofs/walls/trees, whose inter-feature gaps are streets that must stay empty).
 - **`predicate`** keeps whole features by a spatial predicate (the original behaviour).
 
-Post-merge cleanup: `fix_geometry` runs `buffer(0)` on polygon layers; `int_columns` casts attributes to nullable Int64; `reassign_id` regenerates unique 1..N ids so user and raw features never collide; `mark_user_column` records provenance (1 = user, 0 = raw). A per-layer **mask** (`merge.masks`, e.g. `trees: mask_trees.shp`) can give one layer its own keep-user boundary, different from the shared domain footprint.
+Post-merge cleanup: `fix_geometry` runs `buffer(0)` on polygon layers; `int_columns` casts attributes to nullable Int64; `reassign_id` regenerates unique 1..N ids so user and raw features never collide; `mark_user_column` records provenance (1 = user, 0 = raw). A per-layer **mask** (`advanced.merge.masks`, e.g. `trees: mask_trees.shp`) can give one layer its own keep-user boundary, different from the shared domain footprint.
 
 ### boundary — cleaning up sliced buildings
 
@@ -270,7 +268,7 @@ Runs for both domains by default; disable with `boundary_cleanup.enabled: false`
 
 This stage fills the run-configuration skeletons in `defaults/templates/` for the case.
 
-**Values you must supply** — `origin_time` (UTC), `length` (simulation hours), and `wrf_date` — come from `templates.values`; if unset, the `<>` placeholders stay and a warning names them.
+**Values you must supply** — `origin_time` (UTC), `length` (simulation hours), and `wrf_date` — come from `run:`; if unset, the `<>` placeholders stay and a warning names them.
 
 **`nz` is calculated for you** unless you set `nz_parent`/`nz_child` explicitly:
 

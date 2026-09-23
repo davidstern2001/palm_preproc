@@ -264,6 +264,123 @@ EXPECTED = [
 ]
 
 
+def make_config_new(root, cfg_path, name="test_new"):
+    """The same project in the template.yaml layout."""
+    cfg_path.write_text(f"""project:
+    name: {name}
+    root: {root}
+    output_dir: ./{name}
+    overwrite: true
+
+input:
+    raw_data:
+        layers:
+            # phase 2 replaced the shapefile with a GeoPackage
+            landcover: landcover.gpkg
+    user_data:
+        dir: ./test/DATA_user
+        domain: domain.shp
+
+domains:
+    child:
+        grid_size: 2.0
+    parent:
+        grid_size: 4.0
+        buffer: 40.0
+
+run:
+    origin_time: "2023-08-23 19:00:00"
+    length: 2
+    wrf_date: "2023-08-23"
+
+cluster:
+    user: test
+    wrf_dir: /tmp/wrf
+    node_cpus: 8
+    nodes: [1, 8]
+
+advanced:
+    cpu_topology:
+        confirm_optimized: false
+    clip:
+        workers: 1
+    merge:
+        workers: 1
+""")
+
+
+def verify_new_layout(tmp, main):
+    """The template.yaml layout produces the same outputs as the old one."""
+    from palm_preproc.config import Config, ConfigError
+    cfg_path = tmp / "test_new.yaml"
+    make_config_new(tmp, cfg_path)
+    cfg = Config(cfg_path)
+    if cfg.layout != "new":
+        print("FAILED: the new layout was not recognised.")
+        return 1
+    checks = [
+        (cfg["domains"]["child"]["grid_size"] == 2.0, "domains.child.grid_size"),
+        (cfg["domains"]["parent"]["buffer"] == 40.0, "domains.parent.buffer"),
+        (cfg["templates"]["values"]["origin_time"] == "2023-08-23 19:00:00",
+         "run.origin_time -> templates.values.origin_time"),
+        (cfg["templates"]["values"]["hpc_user"] == "test",
+         "cluster.user -> templates.values.hpc_user"),
+        (cfg["templates"]["values"]["min_nodes"] == 1
+         and cfg["templates"]["values"]["max_nodes"] == 8,
+         "cluster.nodes -> min_nodes / max_nodes"),
+        (cfg["clip"]["workers"] == 1 and cfg["merge"]["workers"] == 1,
+         "advanced.clip / advanced.merge"),
+        (cfg["domains"]["child"]["confirm_optimized"] is False,
+         "advanced.cpu_topology.confirm_optimized"),
+    ]
+    for ok, what in checks:
+        if not ok:
+            print(f"FAILED: {what} did not reach the internal settings.")
+            return 1
+
+    for text, expect, what in (
+            ("project:\n    name: x\n    root: .\ninput:\n    crs_: x\n",
+             "Did you mean 'crs'", "a misspelt key"),
+            ("project:\n    name: x\n    root: .\ninput: {}\nmerge:\n"
+             "    mode: difference\n",
+             "old config layout", "a legacy block"),
+    ):
+        bad = tmp / "bad_new.yaml"
+        bad.write_text(text)
+        try:
+            Config(bad)
+            print(f"FAILED: {what} was accepted.")
+            return 1
+        except ConfigError as exc:
+            if expect not in str(exc):
+                print(f"FAILED: {what}: {exc}")
+                return 1
+
+    from palm_preproc.layout import to_new_names
+    if to_new_names("set templates.values.origin_time") != \
+            "set run.origin_time":
+        print("FAILED: messages do not use the new setting names.")
+        return 1
+
+    print("-" * 70)
+    rc = main(["-c", str(cfg_path)])
+    print("-" * 70)
+    if rc != 0:
+        print(f"FAILED: the new-layout run exited with status {rc}")
+        return 1
+    out = tmp / "test_new"
+    # The case name is part of the generated file names.
+    missing = [f for f in EXPECTED
+               if not (out / f.replace("test", "test_new")).exists()]
+    if missing:
+        print("FAILED: expected outputs missing from the new-layout run:")
+        for f in missing:
+            print(f"  - {f}")
+        return 1
+    print("Phase 3 OK - the template.yaml layout produces the same outputs.")
+    return 0
+
+
 def run(keep=False):
     if not check_dependencies():
         return 1
@@ -349,6 +466,9 @@ raw_data:
         n = len(gpd.read_file(shp))
         print(f"Phase 2 OK - landcover.gpkg in -> landcover.shp out "
               f"({n} features).")
+
+        if verify_new_layout(tmp, main) != 0:
+            return 1
 
         print("\nOK - all phases passed.")
         print("palm_preproc works in this environment.")

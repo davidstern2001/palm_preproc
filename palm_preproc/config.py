@@ -5,6 +5,7 @@ from pathlib import Path
 
 import yaml
 
+from .layout import LayoutError, is_new_layout, translate
 from .log import get_logger
 
 log = get_logger()
@@ -263,10 +264,43 @@ class Config:
         elif house_path:
             log.debug(f"[config] no site defaults file at {house_path}")
 
+        # The site defaults may be written in either layout, and so may this
+        # config; each is translated on its own before they are merged.
+        house, _ = self._translate(house, house_path)
+        raw, notes = self._translate(raw, self.yaml_path)
+        self.layout = "new" if notes is not None else "legacy"
+        if self.layout == "new":
+            from .layout import to_new_names
+            from .log import set_message_names
+            set_message_names(to_new_names)
+            for note in notes:
+                log.info(f"[config] {note}")
+
         self.d = _deep_merge(DEFAULTS, house)
         self.d = _deep_merge(self.d, raw)
+        self._apply_stage_switches()
         self._resolve_paths()
         self._validate()
+
+    @staticmethod
+    def _translate(raw, source):
+        """A config in the new layout -> the internal structure. Returns
+        (settings, notes); notes is None for a config already in the
+        internal (pre-1.3) layout."""
+        if not is_new_layout(raw):
+            return raw, None
+        try:
+            return translate(raw)
+        except LayoutError as exc:
+            raise ConfigError(f"Configuration error in '{source}':\n"
+                              f"  - {exc}") from None
+
+    def _apply_stage_switches(self):
+        """`enabled: false` on an output block drops that stage, leaving the
+        rest of the stage list as the defaults have it."""
+        off = self.d.pop("_stages_off", None)
+        if off:
+            self.d["stages"] = [s for s in self.d["stages"] if s not in off]
 
     def _house_defaults_path(self, raw):
         pcfg = raw.get("project") or {}

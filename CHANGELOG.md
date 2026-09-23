@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.3.0
+
+**Config layout, shared with palm2gis and palm_postproc**
+
+- The two data sections move under `input:` (`input.raw_data`,
+  `input.user_data`, `input.crs`, `input.domain_crs`,
+  `input.aux_files`), so a config opens with where the data is.
+- `templates.values` is split into what it actually held: `run:`
+  (origin_time, length, wrf_date), `cluster:` (user, queue, walltime,
+  node_cpus, `nodes: [min, max]`, `cores: [parent, child]`, the palmrun
+  flags) and `advanced.cpu_topology` (the npex/npey pins and the chooser
+  settings).
+- `nz` moves to the domain it belongs to: `domains.child.nz` and
+  `domains.parent.nz`, counted from the domain base.
+- `clip`, `merge`, `boundary_cleanup`, `stages`, `templates.dir`, the
+  grid constraints (`min_power`, `align_child_to_parent`,
+  `strict_nesting`) and the topology settings move under `advanced`.
+  `optimize_topology` per domain becomes
+  `advanced.cpu_topology.optimize_child` / `optimize_parent`.
+- `project.defaults` replaces `defaults_file` / `no_defaults`: a path, or
+  `false` for none.
+- An unknown or misspelt key in the new layout stops the run with a
+  suggestion instead of being silently ignored. Log messages use the new
+  names.
+- Configs in the pre-1.3 layout still load unchanged, and either layout
+  may be used in `defaults/default.yaml`.
+
 ## 1.2.1
 
 **Logging - same style as palm2gis and palm_postproc**
