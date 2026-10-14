@@ -691,8 +691,12 @@ def fill_pgem(text, ctx):
     t = _sub_keyed(t, "dx", _fmt_g(s.grid_size), sep=":")
     t = _sub_keyed(t, "dy", _fmt_g(s.grid_size), sep=":")
     t = _sub_keyed(t, "dz", _fmt_g(s.grid_size), sep=":")
-    t = _sub_keyed(t, "nx", s.nx, sep=":")
-    t = _sub_keyed(t, "ny", s.ny, sep=":")
+    # PALM-GeM's nx/ny are the NUMBER of grid points, unlike the _p3d,
+    # where nx/ny are the last index (points - 1). Writing s.nx here made
+    # the static driver one column and one row short, and PALM aborted in
+    # topography setup (PAC0333: static driver x = nx, model expects nx+1).
+    t = _sub_keyed(t, "nx", s.width_pts, sep=":")
+    t = _sub_keyed(t, "ny", s.height_pts, sep=":")
     t = _sub_keyed(t, "cent_x", f"{(s.origin_x + s.maxx) / 2:.3f}", sep=":")
     t = _sub_keyed(t, "cent_y", f"{(s.origin_y + s.maxy) / 2:.3f}", sep=":")
     if ctx["origin_time"]:

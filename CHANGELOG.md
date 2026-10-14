@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.3.1
+
+**Correctness**
+
+- `pgem_<case>*.yaml` now get the number of grid points as `nx`/`ny`
+  (the `_p3d` `nx`/`ny` + 1). They used to get the `_p3d` values, which
+  are the last grid index; PALM-GeM reads `nx`/`ny` as point counts, so
+  every static driver came out one column and one row short and PALM
+  aborted in topography setup with PAC0333 ("static driver: horizontal
+  dimension in x-direction (= 766) does not match the respective model
+  dimension (= 767)"). The `_p3d` files, the processor topology and the
+  clipped data were already right and are unchanged. Existing
+  `pgem_*.yaml` files are kept on rerun (`templates.overwrite: false`):
+  delete them, or add 1 to their `nx`/`ny` by hand, and rebuild the
+  static drivers.
+
 ## 1.3.0
 
 **Config layout, shared with palm2gis and palm_postproc**

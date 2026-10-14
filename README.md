@@ -168,7 +168,7 @@ your layers in it, copy `template.yaml` to `config/<project>.yaml`, point
 | `DATA_child/`, `DATA_parent/` | clip + merge | The clipped (and merged) data layers, plus `surface_params.csv` and `import_process.log` |
 | `<case>_p3d`, `<case>_p3d_N02` | templates | PALM namelists (parent + child) with grid, topology, and time values filled in |
 | `<case>_p3dr`, `<case>_p3dr_N02` | templates | Restart namelists — identical, but `initializing_actions` is switched to reading restart data |
-| `pgem_<case>.yaml`, `pgem_<case>_N02.yaml` | templates | Static-driver generator configs (dx/dy/dz, nx/ny, cent_x/cent_y, origin_time) |
+| `pgem_<case>.yaml`, `pgem_<case>_N02.yaml` | templates | Static-driver generator configs (dx/dy/dz, nx/ny, cent_x/cent_y, origin_time). PALM-GeM's `nx`/`ny` are grid-point counts, so they are the `_p3d` `nx`/`ny` **+ 1** |
 | `pmeteo_<case>.yaml`, `pmeteo_<case>_N02.yaml` | templates | palm_meteo configs (dz, nz, origin_time, length, WRF paths via `wrf_date`) |
 | `submit_<case>.sh` | templates | `palmrun` submit script; `-X` (total MPI processes, parent + children) and `-T` come from the chosen topology, so it always matches the `_p3d` files. Wall-clock limit, queue, `-c` and `-a` from `cluster:`; disable with `templates.submit: false` |
 | `domains_report.txt` | report | Case summary, nesting validation, `&nesting_parameters`, a summary table, and a provenance header (version, config path, config hash, command line) |

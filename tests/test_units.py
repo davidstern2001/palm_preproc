@@ -27,7 +27,7 @@ from palm_preproc.steps.domains import (          # noqa: E402
     valid_pairs,
 )
 from palm_preproc.steps.templates import (        # noqa: E402
-    _parse_hours, _sub_keyed, make_p3dr,
+    _parse_hours, _sub_keyed, fill_p3d, fill_pgem, make_p3dr,
 )
 
 
@@ -227,6 +227,35 @@ class TestSubKeyed:
 
     def test_custom_separator(self):
         assert _sub_keyed("nz: <>", "nz", 96, sep=":") == "nz: 96"
+
+
+class TestGridDimensions:
+    """The static driver PALM-GeM builds from pgem_*.yaml must have exactly
+    the nx+1 x ny+1 points the _p3d declares. The regression this guards:
+    pgem got the _p3d's nx (last index), PALM-GeM read it as a point
+    count, the driver came out one column short, and PALM aborted with
+    PAC0333 (static driver x = 766, model 767)."""
+
+    def _ctx(self, spec):
+        return {"case": "palmovka", "spec": spec, "other": None, "nz": 504,
+                "npex": None, "npey": None, "origin_time": None,
+                "hours": None, "seasonal": {}}
+
+    def test_pgem_gets_point_counts_p3d_gets_last_index(self):
+        spec = _spec("parent", 4.0, 459000.0, 5546000.0, 768, 768)
+        pgem = fill_pgem("nx: <>\nny: <>\n", self._ctx(spec))
+        p3d = fill_p3d("nx = <>, ny = <>,\n", self._ctx(spec))
+        assert pgem == "nx: 768\nny: 768\n"
+        assert p3d == "nx = 767, ny = 767,\n"
+
+    def test_pgem_centre_and_points_reproduce_the_rectangle(self):
+        spec = _spec("child", 1.0, 459800.0, 5546800.0, 2016, 1536)
+        pgem = fill_pgem("nx: <>\nny: <>\ncent_x: <>\ncent_y: <>\n",
+                         self._ctx(spec))
+        vals = dict(line.split(": ") for line in pgem.splitlines())
+        nx, ny = int(vals["nx"]), int(vals["ny"])
+        assert float(vals["cent_x"]) - nx * spec.grid_size / 2 == spec.origin_x
+        assert float(vals["cent_y"]) - ny * spec.grid_size / 2 == spec.origin_y
 
 
 class TestParseHours:

@@ -17,8 +17,8 @@ domain:
     dx: <>
     dy: <>
     dz: <>
-    nx: <>
-    ny: <>
+    nx: <>                  # grid POINTS (= the _p3d nx + 1)
+    ny: <>                  # grid POINTS (= the _p3d ny + 1)
     cent_x: <>
     cent_y: <>
 
