@@ -27,8 +27,11 @@ from palm_preproc.steps.domains import (          # noqa: E402
     valid_pairs,
 )
 from palm_preproc.steps.templates import (        # noqa: E402
-    _parse_hours, _sub_keyed, fill_p3d, fill_pgem, make_p3dr,
+    _PLACEHOLDER_RE, _parse_hours, _pgem_points_stale, _p3d_values,
+    _resolve_topology, _stale_reason, _sub_keyed, child_nz, fill_p3d,
+    fill_pgem, fmt_real, make_p3dr,
 )
+from palm_preproc.layout import to_new_names     # noqa: E402
 
 
 # ------------------------------
@@ -197,6 +200,41 @@ class TestSpecConstruction:
         assert parent.origin_x <= child.origin_x - 400.0 + 1e-6
         assert parent.maxx >= child.maxx + 400.0 - 1e-6
 
+    @pytest.mark.parametrize("optimize", [False, True])
+    @pytest.mark.parametrize("dx,parent_dx,buffer", [
+        (1.0, 4.0, 0.0), (1.0, 3.0, 0.0), (2.0, 4.0, 10.0), (0.5, 2.0, 0.0),
+    ])
+    def test_child_covers_the_input_and_is_centred(self, dx, parent_dx,
+                                                   buffer, optimize):
+        # The regression this guards: the origin was centred and THEN
+        # floored onto the parent lattice, which shifted the rectangle up
+        # to one parent cell west/south and left a strip of the area of
+        # interest outside the child in ~3 of 4 random cases.
+        import random
+        rng = random.Random(7)
+        cfg = {"grid_size": dx, "buffer": buffer, "min_power": 3,
+               "optimize_topology": optimize, "confirm_optimized": False}
+        span = 300 if optimize else 1500     # the size search is costly
+        for _ in range(100):
+            x0, y0 = rng.uniform(4e5, 5e5), rng.uniform(5.5e6, 5.6e6)
+            b = (x0, y0, x0 + rng.uniform(100, span), y0 + rng.uniform(100, span))
+            c = make_child_spec(b, cfg, "EPSG:32633",
+                                parent_grid_size=parent_dx)
+            west, east = b[0] - buffer - c.origin_x, c.maxx - (b[2] + buffer)
+            south, north = b[1] - buffer - c.origin_y, c.maxy - (b[3] + buffer)
+            assert min(west, east, south, north) >= -1e-6
+            assert abs(west - east) <= parent_dx + 1e-6
+            assert abs(south - north) <= parent_dx + 1e-6
+            assert math.isclose(c.origin_x / parent_dx,
+                                round(c.origin_x / parent_dx), abs_tol=1e-6)
+
+    def test_the_documented_case(self):
+        cfg = {"grid_size": 1.0, "buffer": 0.0, "min_power": 3,
+               "optimize_topology": False}
+        c = make_child_spec((1.0, 1.0, 801.0, 801.0), cfg, "EPSG:32633",
+                            parent_grid_size=4.0)
+        assert c.origin_x <= 1.0 and c.maxx >= 801.0
+
 
 # ------------------------------
 # 4. NAMELIST SUBSTITUTION
@@ -256,6 +294,138 @@ class TestGridDimensions:
         nx, ny = int(vals["nx"]), int(vals["ny"])
         assert float(vals["cent_x"]) - nx * spec.grid_size / 2 == spec.origin_x
         assert float(vals["cent_y"]) - ny * spec.grid_size / 2 == spec.origin_y
+
+
+class TestNumberFormatting:
+    @pytest.mark.parametrize("value,want", [
+        (1, "1.0"), (2.0, "2.0"), (0.25, "0.25"), (1.25, "1.25"),
+        (400.0, "400.0"), (1002.5, "1002.5"),
+    ])
+    def test_reals_keep_their_digits(self, value, want):
+        # ':.1f' wrote dx = 0.25 as 0.2 into the namelist
+        assert fmt_real(value) == want
+
+    def test_p3d_grid_spacing(self):
+        spec = _spec("child", 0.25, 0.0, 0.0, 64, 64)
+        ctx = {"case": "c", "spec": spec, "other": None, "nz": None,
+               "npex": None, "npey": None, "origin_time": None,
+               "hours": None, "seasonal": {}}
+        assert fill_p3d("dx = <>.0, dz = <>.0,", ctx) == "dx = 0.25, dz = 0.25,"
+
+    def test_placeholders_are_counted_once(self):
+        assert len(_PLACEHOLDER_RE.findall("nx = <>, ny = <>, <case>")) == 3
+
+
+class TestMessageNames:
+    def test_prefix_keys_need_a_setting_after_them(self):
+        assert to_new_names("nothing to merge.") == "nothing to merge."
+        assert to_new_names("nothing to clip.") == "nothing to clip."
+
+    def test_settings_are_still_renamed(self):
+        assert to_new_names("merge.mode") == "advanced.merge.mode"
+        assert (to_new_names("templates.values.npex_child = 7")
+                == "advanced.cpu_topology.npex_child = 7")
+
+
+# ------------------------------
+# 5. NZ AND TOPOLOGY CHOICES
+# ------------------------------
+class TestChildNz:
+    def test_the_mean_governs_ordinary_blocks(self):
+        nz, _, rule = child_nz(20.0, 25.0, 1.0, 4.0, 1.5, 8)
+        assert (nz, rule) == (80, "mean")
+
+    def test_a_tall_tower_raises_the_top(self):
+        # 100 m tower among 15 m blocks: the mean alone gave 64 m
+        nz, raw, rule = child_nz(16.0, 100.0, 1.0, 4.0, 1.5, 8)
+        assert rule == "tallest"
+        assert nz * 1.0 >= 150.0 and nz % 8 == 0
+
+
+def _topo_cfg(**values):
+    tv = {"node_cpus": 80, "min_nodes": 2, "max_nodes": 16}
+    tv.update(values)
+    return {"templates": {"values": tv, "topology_select": False},
+            "domains": {"parent": {"topology_opt": True},
+                        "child": {"topology_opt": True}}}
+
+
+class TestTopologyPins:
+    P = DomainSpec("parent", "EPSG:32633", 4.0, 0.0, 0.0, 768, 768)
+    C = DomainSpec("child", "EPSG:32633", 1.0, 400.0, 400.0, 2016, 2016)
+
+    def _resolve(self, **pins):
+        cfg = _topo_cfg(**pins)
+        _resolve_topology(self.C, self.P, cfg, nested=True)
+        return cfg["templates"]["values"]
+
+    def test_a_partial_pin_is_kept(self):
+        # it used to be overwritten by the chooser without a word
+        tv = self._resolve(npex_parent=8)
+        assert tv["npex_parent"] == 8
+        assert all(tv[k] for k in ("npey_parent", "npex_child", "npey_child"))
+
+    def test_a_pin_that_does_not_divide_the_grid_is_an_error(self):
+        with pytest.raises(RuntimeError, match="does not divide"):
+            self._resolve(npex_child=5)
+
+    def test_pins_no_topology_agrees_with_are_an_error(self):
+        with pytest.raises(RuntimeError, match="No valid topology"):
+            self._resolve(npex_parent=24, npey_parent=4)
+
+    def test_full_pins_bypass_the_chooser(self):
+        tv = self._resolve(npex_parent=8, npey_parent=8, npex_child=12,
+                           npey_child=12)
+        assert (tv["npex_parent"], tv["npex_child"]) == (8, 12)
+
+
+# ------------------------------
+# 6. STALE GENERATED FILES
+# ------------------------------
+class TestStaleSet:
+    P = DomainSpec("parent", "EPSG:32633", 4.0, 1000.0, 2000.0, 144, 144)
+    C = DomainSpec("child", "EPSG:32633", 2.0, 1200.0, 2200.0, 80, 80)
+
+    P3D = ("!-- nx=63\n &nesting_parameters\n"
+           "    domain_layouts = 'parent',   1,  -1, 16,  0.0, 0.0,\n"
+           "                     'child',    2,   1, 16, 40.0, 40.0,\n /\n"
+           "         nx = 63, ny = 63, nz = 504,\n"
+           "         npex = 4,\n         npey = 4,\n")
+
+    def test_values_are_read_back_from_a_p3d(self, tmp_path):
+        (tmp_path / "c_p3d").write_text(self.P3D)
+        v = _p3d_values(tmp_path / "c_p3d")
+        assert (v["nx"], v["ny"], v["nz"], v["npex"], v["npey"]) == (
+            63, 63, 504, 4, 4)
+        assert v["llx_lly"] == (40.0, 40.0)
+
+    def test_a_changed_parent_makes_a_legacy_set_stale(self):
+        # the user's case: buffer 40 -> 200 m, files from the 40 m run kept
+        rec = {"legacy": True, "topology": {}, "nz": {},
+               "domains": {"parent": {"width_pts": 64, "height_pts": 64}},
+               "llx_lly": (40.0, 40.0)}
+        assert "parent grid 64x64 -> 144x144" in _stale_reason(
+            rec, {"parent": self.P, "child": self.C}, True, "parent")
+
+    def test_a_matching_record_is_not_stale(self):
+        from palm_preproc.steps.templates import _geometry
+        rec = {"nested": True, "domains": {"parent": _geometry(self.P),
+                                           "child": _geometry(self.C)}}
+        assert _stale_reason(rec, {"parent": self.P, "child": self.C},
+                             True, "parent") is None
+        moved = DomainSpec("child", "EPSG:32633", 2.0, 1204.0, 2200.0, 80, 80)
+        assert _stale_reason(rec, {"parent": self.P, "child": moved},
+                             True, "parent") == "child domain geometry changed"
+        del rec["domains"]["child"]["origin_x"]       # incomplete record
+        assert _stale_reason(rec, {"parent": self.P, "child": self.C},
+                             True, "parent") == "child domain geometry changed"
+
+    def test_a_pre_1_3_1_pgem_is_stale(self, tmp_path):
+        f = tmp_path / "pgem_c.yaml"
+        f.write_text("domain:\n    nx: 143\n    ny: 143\n")
+        assert "points - 1" in _pgem_points_stale(f, self.P)
+        f.write_text("domain:\n    nx: 144   # grid POINTS\n    ny: 144\n")
+        assert _pgem_points_stale(f, self.P) is None
 
 
 class TestParseHours:

@@ -235,9 +235,11 @@ def make_child_spec(bounds, child_cfg, aligned_crs, parent_grid_size=None,
                     align_to_parent=True, interactive_override=None):
     """Child domain rectangle from input bounds (minx, miny, maxx, maxy).
 
-    The rectangle is expanded symmetrically around the input centre, snapped
-    up to a PALM-friendly size, and its origin floored to the alignment grid
-    (the parent grid when alignment is on, else the child grid).
+    The origin is floored onto the alignment grid (the parent grid when
+    alignment is on, else the child grid) just west/south of the buffered
+    input, the size is snapped up from there so the input is always fully
+    covered, and any slack is then split between the two sides in whole
+    alignment steps so the rectangle stays centred on the input.
     """
     dx = float(child_cfg["grid_size"])
     buffer = float(child_cfg.get("buffer", 0.0))
@@ -256,29 +258,45 @@ def make_child_spec(bounds, child_cfg, aligned_crs, parent_grid_size=None,
                         f"is not an integer - alignment skipped.")
 
     minx, miny, maxx, maxy = bounds
-    width = (maxx - minx) + 2 * buffer
-    height = (maxy - miny) + 2 * buffer
     log.debug(f"[domains] child: input bounds {maxx-minx:.1f} x {maxy-miny:.1f} m, "
              f"buffer {buffer:g} m/side, grid {dx:g} m, stride {stride} pts")
 
-    w_pts, h_pts, score = _size_axes(width / dx, height / dx, stride, child_cfg)
+    # The lattice origin just west/south of the buffered input, and the
+    # points needed from there to its east/north edge. Sizing from the
+    # floored origin (not from the input width) is what guarantees
+    # coverage: the old centre-then-floor placement could shift the
+    # rectangle up to one alignment step west/south and leave that strip
+    # of the input outside the child.
+    lo_x = math.floor(round((minx - buffer) / align_grid, 9)) * align_grid
+    lo_y = math.floor(round((miny - buffer) / align_grid, 9)) * align_grid
+    need_x = round((maxx + buffer - lo_x) / dx, 6)
+    need_y = round((maxy + buffer - lo_y) / dx, 6)
+
+    w_pts, h_pts, score = _size_axes(need_x, need_y, stride, child_cfg)
 
     # Remark: the user decides whether an optimization-grown child is
     # accepted (interactive sessions only; batch runs proceed and say so).
     if child_cfg.get("optimize_topology") and child_cfg.get("confirm_optimized", True):
-        base_w = snap_up(width / dx, stride)
-        base_h = snap_up(height / dx, stride)
+        base_w = snap_up(need_x, stride)
+        base_h = snap_up(need_y, stride)
         if (w_pts, h_pts) != (base_w, base_h):
             w_pts, h_pts, score = _confirm_optimized_child(
                 (w_pts, h_pts, score), (base_w, base_h),
                 child_cfg, interactive_override)
 
-    # Centre-expand, then floor SW origin onto the alignment grid. The
-    # origin is constructed as (integer lattice index) * align_grid and
-    # rounded, so it lies EXACTLY on the lattice by construction.
-    cx, cy = (minx + maxx) / 2, (miny + maxy) / 2
-    ox = round(math.floor((cx - w_pts * dx / 2) / align_grid) * align_grid, 6)
-    oy = round(math.floor((cy - h_pts * dx / 2) / align_grid) * align_grid, 6)
+    # Centre: move the origin west/south in whole lattice steps (so it
+    # stays EXACTLY on the lattice: integer index * align_grid, rounded),
+    # choosing the step count that best equalises the two margins without
+    # uncovering the far side.
+    def centred(lo, edge, need, pts):
+        slack = (pts - need) * dx          # spare metres beyond the far edge
+        near = edge - lo                   # margin already on the near side
+        steps = round((slack - near) / (2 * align_grid))
+        steps = min(max(steps, 0), math.floor(round(slack / align_grid, 9)))
+        return round(lo - steps * align_grid, 6)
+
+    ox = centred(lo_x, minx - buffer, need_x, w_pts)
+    oy = centred(lo_y, miny - buffer, need_y, h_pts)
 
     spec = DomainSpec("child", str(aligned_crs), dx, ox, oy, w_pts, h_pts, score)
     _log_spec(spec)

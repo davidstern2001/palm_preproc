@@ -105,7 +105,9 @@ templates:
     wrf_dir: null                     # base dir of WRF output (pmeteo file masks)
     # nz auto-calculation defaults (used only when nz_parent/nz_child are
     # not set explicitly in a project's templates.values):
-    child_nz_height_factor: 4.0       # dz*nz(child) = factor x max building height
+    child_nz_height_factor: 4.0       # dz*nz(child) = factor x MEAN rooftop height
+    child_nz_tallest_factor: 1.5      #   ... but at least this x the TALLEST
+                                      #   rooftop (both above the domain base)
     parent_target_height_m: 2000.0    # dz*nz(parent) ~= this height
     # Cluster facts - the same for every project on this machine:
     node_cpus: 80

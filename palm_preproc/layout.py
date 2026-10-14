@@ -52,7 +52,8 @@ SCHEMA = {
     "seasonal": None,            # deep-merged over defaults/templates/seasonal.yaml
     "advanced": {
         "stages": None, "templates_dir": None,
-        "grid": {"nz_factor": None, "parent_target_height": None,
+        "grid": {"nz_factor": None, "nz_tallest_factor": None,
+                 "parent_target_height": None,
                  "min_power": None, "align_child_to_parent": None,
                  "strict_nesting": None},
         "cpu_topology": {"select": None, "list_all": None,
@@ -127,6 +128,8 @@ _DIRECT = [
     ("advanced.merge", "merge"),
     ("advanced.boundary_cleanup", "boundary_cleanup"),
     ("advanced.grid.nz_factor", "templates.values.child_nz_height_factor"),
+    ("advanced.grid.nz_tallest_factor",
+     "templates.values.child_nz_tallest_factor"),
     ("advanced.grid.parent_target_height",
      "templates.values.parent_target_height_m"),
     ("advanced.grid.align_child_to_parent", "domains.align_child_to_parent"),
@@ -145,6 +148,25 @@ _DIRECT = [
     ("advanced.cpu_topology.npex_child", "templates.values.npex_child"),
     ("advanced.cpu_topology.npey_child", "templates.values.npey_child"),
 ]
+
+# Settings where an explicit `null` means something ("none", "derive it",
+# "leave the placeholder") and must override a value from the site
+# defaults. Everywhere else `null` reads as "not set", so a blank
+# `dir:` or `strict_nesting:` falls back to the default instead of
+# becoming None. (cluster.nodes / cluster.cores take null too; they are
+# translated separately below.)
+_NULLABLE = {
+    "project.state_file", "input.domain_crs",
+    "input.user_data.domain", "input.user_data.domain_from",
+    "domains.child.nz", "domains.parent.nz",
+    "run.origin_time", "run.length", "run.wrf_date",
+    "cluster.user", "cluster.wrf_dir", "cluster.queue", "cluster.walltime",
+    "cluster.node_cpus", "cluster.palmrun_id", "cluster.palmrun_config",
+    "cluster.palmrun_activation",
+    "templates.case", "report.file", "advanced.templates_dir",
+    "advanced.cpu_topology.npex_parent", "advanced.cpu_topology.npey_parent",
+    "advanced.cpu_topology.npex_child", "advanced.cpu_topology.npey_child",
+}
 
 # Settings that reach BOTH domains from one key.
 _BOTH_DOMAINS = {
@@ -206,6 +228,17 @@ def _get(raw, path):
     return node
 
 
+def _given(raw, path):
+    """(present, value) at a dotted path: present is True for an explicit
+    `null` too, which _get cannot tell apart from a missing key."""
+    node = raw
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return False, None
+        node = node[part]
+    return True, node
+
+
 def _put(out, path, value):
     node = out
     parts = path.split(".")
@@ -234,11 +267,13 @@ def translate(raw):
 
     name = _get(raw, "project.name")
     for new_path, internal in _DIRECT:
-        val = _get(raw, new_path)
+        present, val = _given(raw, new_path)
         if val is not None:
             if isinstance(val, str) and name:
                 val = val.replace("{name}", name)
             _put(out, internal, val)
+        elif present and new_path in _NULLABLE:
+            _put(out, internal, None)
     for new_path, key in _BOTH_DOMAINS.items():
         val = _get(raw, new_path)
         if val is not None:
@@ -263,20 +298,17 @@ def translate(raw):
                           f"{defaults!r}.")
 
     # -- cluster.nodes / cluster.cores ---------------------------------------
-    nodes = _get(raw, "cluster.nodes")
-    if nodes is not None:
-        lo, hi = _pair(nodes, "cluster.nodes")
-        if lo is not None:
-            _put(out, "templates.values.min_nodes", lo)
-        if hi is not None:
-            _put(out, "templates.values.max_nodes", hi)
-    cores = _get(raw, "cluster.cores")
-    if cores is not None:
-        parent, child = _pair(cores, "cluster.cores")
-        if parent is not None:
-            _put(out, "templates.values.npes_parent", parent)
-        if child is not None:
-            _put(out, "templates.values.npes_child", child)
+    # Both entries are always written: a null entry means "no limit" /
+    # "no target" and must override the site defaults, and `nodes: null`
+    # clears both.
+    for key, internal in (("cluster.nodes", ("min_nodes", "max_nodes")),
+                          ("cluster.cores", ("npes_parent", "npes_child"))):
+        present, val = _given(raw, key)
+        if not present:
+            continue
+        pair = (None, None) if val is None else _pair(val, key)
+        for k, v in zip(internal, pair):
+            _put(out, f"templates.values.{k}", v)
 
     # -- which stages run ----------------------------------------------------
     # A stage is switched off by `enabled: false` on its own block; the rest
@@ -288,8 +320,8 @@ def translate(raw):
                      + ", ".join(sorted(off)))
         out["_stages_off"] = off
 
-    if _get(raw, "input.user_data.domain") is None and \
-            _get(raw, "input.user_data.domain_from") is None and \
+    if not _given(raw, "input.user_data.domain")[0] and \
+            not _given(raw, "input.user_data.domain_from")[0] and \
             (raw.get("input") or {}).get("user_data") is not None:
         notes.append("input.user_data: neither domain nor domain_from is "
                      "set - the site defaults decide the area of interest.")
@@ -302,6 +334,7 @@ def translate(raw):
 # ------------------------------
 MESSAGE_NAMES = {
     "crs.aligned": "input.crs",
+    "project.defaults_file": "project.defaults",
     "crs.domain_output": "input.domain_crs",
     "user_data.dir": "input.user_data.dir",
     "user_data.domain_from": "input.user_data.domain_from",
@@ -314,10 +347,19 @@ MESSAGE_NAMES = {
     "templates.values.nz_child": "domains.child.nz",
     "templates.values.nz_parent": "domains.parent.nz",
     "templates.values.node_cpus": "cluster.node_cpus",
+    "templates.values.child_nz_height_factor": "advanced.grid.nz_factor",
+    "templates.values.child_nz_tallest_factor":
+        "advanced.grid.nz_tallest_factor",
     "templates.values.walltime": "cluster.walltime",
     "templates.values.hpc_user": "cluster.user",
     "templates.values": "run / cluster",
     "templates.topology_select": "advanced.cpu_topology.select",
+    "domains.<d>.topology_opt": "advanced.cpu_topology.cells_per_core_div4",
+    "templates.values.min_nodes/max_nodes": "cluster.nodes",
+    "templates.values.npex_parent": "advanced.cpu_topology.npex_parent",
+    "templates.values.npex_child": "advanced.cpu_topology.npex_child",
+    "templates.values.npey_parent": "advanced.cpu_topology.npey_parent",
+    "templates.values.npey_child": "advanced.cpu_topology.npey_child",
     "templates.list_all_topologies": "advanced.cpu_topology.list_all",
     "templates.dir": "advanced.templates_dir",
     "domains.child.optimize_topology": "advanced.cpu_topology.optimize_child",
@@ -333,10 +375,13 @@ MESSAGE_NAMES = {
     "stages": "advanced.stages",
 }
 
+# A key ending in "." is a prefix ("merge." -> "advanced.merge.") and must
+# be followed by the rest of a setting name: at the end of a sentence
+# ("nothing to merge.") it is just a word. Other keys are whole names.
 _MESSAGE_RE = re.compile(
-    r"(?<!\w)(" + "|".join(re.escape(k) for k in
-                           sorted(MESSAGE_NAMES, key=len, reverse=True))
-    + r")(?!\w)")
+    r"(?<!\w)(" + "|".join(
+        re.escape(k) + (r"(?=\w)" if k.endswith(".") else r"(?!\w)")
+        for k in sorted(MESSAGE_NAMES, key=len, reverse=True)) + r")")
 
 
 def to_new_names(text):

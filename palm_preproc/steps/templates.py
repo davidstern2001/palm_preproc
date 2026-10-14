@@ -23,9 +23,12 @@ manual filling. Existing output files are never overwritten unless
 templates.overwrite is true.
 """
 
+import json
 import math
 import os
 import re
+import shutil
+from datetime import datetime
 from pathlib import Path
 
 from ..log import get_logger, progress
@@ -85,6 +88,14 @@ def _fmt_g(v):
     return f"{float(v):g}"
 
 
+def fmt_real(v):
+    """A real for a namelist or YAML: every significant digit, and at least
+    one decimal (1 -> '1.0', 0.25 -> '0.25'). Grid spacings and offsets
+    used to go through ':.1f', which wrote dx = 0.25 as '0.2'."""
+    s = f"{float(v):.10g}"
+    return s if any(c in s for c in ".eE") else s + ".0"
+
+
 # ------------------------------
 # 2. CONTEXT
 # ------------------------------
@@ -107,18 +118,19 @@ def _max_building_height(cfg, domain_name):
     return float(arr.max()) if arr.size else None
 
 
-def _mean_abs_rooftop_height(cfg, domain_name):
-    """Mean absolute rooftop height over the domain's building cells, in
-    metres, referenced to the domain's lowest terrain point (the datum PALM's
-    static driver uses: min(zt) -> z = 0). Or None if it can't be determined.
+def _abs_rooftop_heights(cfg, domain_name):
+    """(mean, max) absolute rooftop height over the domain's building
+    cells, in metres, referenced to the domain's lowest terrain point (the
+    datum PALM's static driver uses: min(zt) -> z = 0). Or None if it
+    can't be determined.
 
     For each building cell: abs_roof = terrain + building_height - min(terrain
-    over the whole domain). The average is taken over building cells only, so
-    a hill with no buildings on it raises min(terrain) into the datum but does
-    NOT inflate the target; buildings sitting on higher ground correctly count
-    at their true absolute rooftop height. This matches the roughness-sublayer
-    reasoning (dz*nz ~ 3-5 x mean building height) in the static driver's
-    absolute-height frame.
+    over the whole domain). Both statistics are taken over building cells
+    only, so a hill with no buildings on it raises min(terrain) into the
+    datum but does NOT inflate them; buildings sitting on higher ground
+    correctly count at their true absolute rooftop height. The mean drives
+    the roughness-sublayer target (dz*nz ~ 3-5 x mean building height) and
+    the max keeps the tallest building below the model top.
 
     Requires the DEM and buildings rasters to be on the same grid (they are
     when clip.snap_rasters_to_grid is on, which snaps both to each domain's
@@ -166,7 +178,23 @@ def _mean_abs_rooftop_height(cfg, domain_name):
         return None
 
     abs_roof = dem[mask] + bld[mask] - floor
-    return float(abs_roof.mean())
+    return float(abs_roof.mean()), float(abs_roof.max())
+
+
+def child_nz(h_mean, h_max, dz, factor, tallest_factor, stride):
+    """Child nz from rooftop heights: the larger of the roughness-sublayer
+    target (factor x mean rooftop height) and the clearance over the
+    tallest building (tallest_factor x max rooftop height), snapped up to
+    the multigrid stride. Returns (nz, raw points, which rule governed).
+
+    The mean alone let one tower among low blocks reach the model top: a
+    100 m tower among 15 m buildings gives a mean near 16 m and, at
+    factor 4, a 64 m domain."""
+    by_mean = factor * h_mean / dz
+    by_max = tallest_factor * h_max / dz
+    nz_raw = max(by_mean, by_max)
+    return snap_up(nz_raw, stride), nz_raw, (
+        "mean" if by_mean >= by_max else "tallest")
 
 
 def _auto_nz(cfg, spec):
@@ -175,7 +203,9 @@ def _auto_nz(cfg, spec):
       * child:  dz*nz = child_nz_height_factor x mean absolute rooftop height
                 (terrain + building, referenced to the domain's lowest terrain
                 point) over the FINAL buildings raster -- the roughness-
-                sublayer target in the static driver's absolute-height frame.
+                sublayer target in the static driver's absolute-height frame
+                -- but at least child_nz_tallest_factor x the tallest
+                absolute rooftop, so no building reaches the model top.
                 Falls back to the relative max building height if the DEM and
                 buildings rasters are not grid-aligned.
       * parent: dz*nz ~= parent_target_height_m.
@@ -196,25 +226,33 @@ def _auto_nz(cfg, spec):
     stride = 1 << min_power
     if spec.name == "child":
         factor = float(tv.get("child_nz_height_factor", 3.0))
-        h = _mean_abs_rooftop_height(cfg, spec.name)
-        basis = "mean absolute rooftop height"
-        if h is None:
+        tallest = float(tv.get("child_nz_tallest_factor", 1.5))
+        heights = _abs_rooftop_heights(cfg, spec.name)
+        basis = "absolute rooftop height"
+        if heights is None:
             # Grids not aligned, or no DEM: fall back to the relative
             # (above-terrain) building height so a driver is still produced.
             # Note this can undersize nz where buildings sit well above the
             # domain's lowest terrain.
             h = _max_building_height(cfg, spec.name)
+            heights = None if h is None else (h, h)
             basis = "max relative building height (DEM unavailable/unaligned)"
-        if h is None:
+        if heights is None:
             log.warning(f"[templates] {spec.name}: no building height for "
                         f"nz (buildings raster missing or empty) - nz left "
                         f"as a placeholder.")
             return None
-        nz_raw = factor * h / dz
-        nz = snap_up(nz_raw, stride)
+        h_mean, h_max = heights
         # Snapped up to a multiple of `stride` for the multigrid solver.
-        log.info(f"[templates] {spec.name}: nz = {nz} ({factor:g} x {basis} "
-                 f"{h:.1f} m, {nz_raw:.1f} pts snapped to x{stride})")
+        nz, nz_raw, rule = child_nz(h_mean, h_max, dz, factor, tallest,
+                                    stride)
+        if rule == "mean":
+            why = f"{factor:g} x mean {basis} {h_mean:.1f} m"
+        else:
+            why = (f"{tallest:g} x tallest {basis} {h_max:.1f} m, above "
+                   f"{factor:g} x mean {h_mean:.1f} m")
+        log.info(f"[templates] {spec.name}: nz = {nz} ({why}, "
+                 f"{nz_raw:.1f} pts snapped to x{stride})")
         return nz
     else:
         target = float(tv.get("parent_target_height_m", 2000.0))
@@ -516,36 +554,118 @@ def build_context(spec, cfg, other=None):
     return ctx
 
 
+_TOPO_KEYS = ("npex_parent", "npey_parent", "npex_child", "npey_child")
+
+
+def _check_pins(tv, specs, opts):
+    """Validate the npex/npey pinned in templates.values for the domains in
+    `specs` ({name: DomainSpec}). A pin that does not divide the domain's
+    grid points is an error (PALM aborts on it, after queueing); a pin
+    PALM accepts but Hynek Reznicek's rules do not recommend is a warning.
+    Pins are normalised to int in place."""
+    for name, spec in specs.items():
+        for axis, pts in (("npex", spec.width_pts), ("npey", spec.height_pts)):
+            key = f"{axis}_{name}"
+            v = tv.get(key)
+            if v is None:
+                continue
+            try:
+                f = float(v)
+            except (TypeError, ValueError):
+                f = math.nan
+            if isinstance(v, bool) or not f.is_integer() or f < 1:
+                raise RuntimeError(f"templates.values.{key} = {v!r} is not a "
+                                   f"positive whole number.")
+            v = tv[key] = int(f)
+            if pts % v:
+                d = axis[-1]
+                raise RuntimeError(
+                    f"templates.values.{key} = {v} does not divide the "
+                    f"{name} domain's {pts} grid points along {d} (PALM "
+                    f"needs n{d}+1 divisible by {axis}); remove the pin or "
+                    f"pick a divisor.")
+        npex, npey = tv.get(f"npex_{name}"), tv.get(f"npey_{name}")
+        if npex and npey and (npex, npey) not in {
+                p[:2] for p in valid_pairs(spec.width_pts, spec.height_pts,
+                                           opts[name])}:
+            log.warning(f"[topology] {name}: pinned npex={npex} npey={npey} "
+                        f"is outside the recommended topology rules "
+                        f"(PALM accepts it; check the cells per core).")
+
+
+def _pinned_matches(configs, tv, names, nested):
+    """Keep the configurations agreeing with every pinned npex/npey."""
+    pins = {(n, a): tv[f"{a}_{n}"] for n in names for a in ("npex", "npey")
+            if tv.get(f"{a}_{n}")}
+    if not pins:
+        return configs, pins
+    kept = [c for c in configs
+            if all((c[n] if nested else c)[a] == v
+                   for (n, a), v in pins.items())]
+    log.debug(f"[topology] pinned {pins}: {len(kept)}/{len(configs)} kept")
+    return kept, pins
+
+
 def _resolve_topology(child, parent, cfg, nested, state=None):
     """Fill templates.values npex/npey via Hynek Reznicek's topology rules,
-    interactively when configured and possible. Pinned values win. The
-    resolved topology is persisted to the pipeline state so the report can
-    document the actual choice."""
+    interactively when configured and possible. Pinned values win: all of
+    them pinned bypasses the chooser, some of them pinned restricts it to
+    the configurations that agree with them (they used to be overwritten
+    silently). The resolved topology is persisted to the pipeline state so
+    the report can document the actual choice."""
     tv = cfg["templates"]["values"]
     raw_mode = cfg["templates"].get("topology_select", True)
     mode = "ask" if raw_mode in (True, "ask", "true") else "auto"
     node_cpus = tv.get("node_cpus")
     topo_opt = cfg["domains"]["parent"].get("topology_opt", True)
     topo_opt_child = cfg["domains"]["child"].get("topology_opt", topo_opt)
+    opts = {"parent": topo_opt, "child": topo_opt_child}
 
     progress("Selecting processor topology")
     if nested:
-        if all(tv.get(k) for k in ("npex_parent", "npey_parent",
-                                   "npex_child", "npey_child")):
+        _check_pins(tv, {"parent": parent, "child": child}, opts)
+        if all(tv.get(k) for k in _TOPO_KEYS):
+            ratio = (tv["npex_parent"] * tv["npey_parent"]
+                     / (tv["npex_child"] * tv["npey_child"]))
+            if not 0.300 < ratio < 1.001:
+                log.warning(f"[topology] pinned parent:child cores "
+                            f"{ratio:.2f} is outside the recommended "
+                            f"1:3 .. 1:1.")
             _persist_topology(tv, state)
             return
         configs = nested_configurations(parent, child, topo_opt, topo_opt_child)
-        configs = filter_by_nodes(configs, node_cpus, tv.get("min_nodes"),
-                                  tv.get("max_nodes"), nested=True)
-        configs = dedupe_by_cores(configs, nested=True)
-        if not cfg["templates"].get("list_all_topologies", False):
-            configs = best_per_node_group(configs, node_cpus, nested=True)
+        configs, pins = _pinned_matches(configs, tv, ("parent", "child"),
+                                        nested=True)
+    else:
+        name = cfg["templates"].get("single_domain", "parent")
+        spec = parent if name == "parent" else child
+        _check_pins(tv, {name: spec}, opts)
+        if tv.get(f"npex_{name}") and tv.get(f"npey_{name}"):
+            _persist_topology(tv, state)
+            return
+        configs = single_configurations(spec, opts[name])
+        configs, pins = _pinned_matches(configs, tv, (name,), nested=False)
+    if pins and not configs:
+        shown = ", ".join(f"{a}_{n}={v}" for (n, a), v in pins.items())
+        raise RuntimeError(
+            f"No valid topology agrees with the pinned {shown}. Pin all of "
+            f"npex/npey to use exactly those values, or remove the pin(s).")
+
+    configs = filter_by_nodes(configs, node_cpus, tv.get("min_nodes"),
+                              tv.get("max_nodes"), nested=nested)
+    configs = dedupe_by_cores(configs, nested=nested)
+    if not cfg["templates"].get("list_all_topologies", False):
+        configs = best_per_node_group(configs, node_cpus, nested=nested)
+    if nested:
         rec = recommend_nested(configs, tv.get("npes_parent"),
                                tv.get("npes_child"), node_cpus)
-        idx = choose_topology(configs, rec, mode, node_cpus, nested=True)
-        if idx is None:
-            return
-        chosen = configs[idx]
+    else:
+        rec = recommend_single(configs, tv.get(f"npes_{name}"), node_cpus)
+    idx = choose_topology(configs, rec, mode, node_cpus, nested=nested)
+    if idx is None:
+        return
+    chosen = configs[idx]
+    if nested:
         tv["npex_parent"], tv["npey_parent"] = (chosen["parent"]["npex"],
                                                 chosen["parent"]["npey"])
         tv["npex_child"], tv["npey_child"] = (chosen["child"]["npex"],
@@ -555,23 +675,6 @@ def _resolve_topology(child, parent, cfg, nested, state=None):
                  f"N02 npex={tv['npex_child']} npey={tv['npey_child']} "
                  f"({chosen['child']['cores']}), sum_cpu={chosen['sum']}")
     else:
-        name = cfg["templates"].get("single_domain", "parent")
-        spec = parent if name == "parent" else child
-        if tv.get(f"npex_{name}") and tv.get(f"npey_{name}"):
-            _persist_topology(tv, state)
-            return
-        opt = topo_opt if name == "parent" else topo_opt_child
-        configs = single_configurations(spec, opt)
-        configs = filter_by_nodes(configs, node_cpus, tv.get("min_nodes"),
-                                  tv.get("max_nodes"), nested=False)
-        configs = dedupe_by_cores(configs, nested=False)
-        if not cfg["templates"].get("list_all_topologies", False):
-            configs = best_per_node_group(configs, node_cpus, nested=False)
-        rec = recommend_single(configs, tv.get(f"npes_{name}"), node_cpus)
-        idx = choose_topology(configs, rec, mode, node_cpus, nested=False)
-        if idx is None:
-            return
-        chosen = configs[idx]
         tv[f"npex_{name}"], tv[f"npey_{name}"] = chosen["npex"], chosen["npey"]
         log.info(f"[topology] {name} npex={chosen['npex']} "
                  f"npey={chosen['npey']} ({chosen['cores']} cores)")
@@ -621,20 +724,20 @@ def fill_p3d(text, ctx, child_ctx=None):
         lly = c.origin_y - s.origin_y
         t = _sub_line_positional(t, "'parent',", ["0.0", "0.0"], suffix=".0")
         t = _sub_line_positional(t, "'child',",
-                                 [f"{llx:.1f}", f"{lly:.1f}"], suffix=".0")
+                                 [fmt_real(llx), fmt_real(lly)], suffix=".0")
 
     # child (N02) header: offset from root + GSR
     if o is not None and s.name == "child":
         llx = s.origin_x - o.origin_x
         lly = s.origin_y - o.origin_y
         t = _sub_line_positional(t, "Offset from root SW corner",
-                                 [f"{llx:.1f}", f"{lly:.1f}"])
+                                 [fmt_real(llx), fmt_real(lly)])
         t = _sub_line_positional(t, "Grid Spacing Ratio",
                                  [_fmt_g(o.grid_size / s.grid_size)])
 
     # standalone header: SW corner
     t = _sub_line_positional(t, "SW corner (UTM)",
-                             [f"{s.origin_x:.1f}", f"{s.origin_y:.1f}"])
+                             [fmt_real(s.origin_x), fmt_real(s.origin_y)])
 
     # model grid
     t = _sub_keyed(t, "nx", s.nx)
@@ -642,7 +745,7 @@ def fill_p3d(text, ctx, child_ctx=None):
     if ctx["nz"]:
         t = _sub_keyed(t, "nz", ctx["nz"])
     for k in ("dx", "dy", "dz"):
-        t = _sub_keyed(t, k, f"{float(s.grid_size):.1f}", suffix=".0")
+        t = _sub_keyed(t, k, fmt_real(s.grid_size), suffix=".0")
 
     # time origin / run length
     if ctx["origin_time"]:
@@ -714,7 +817,7 @@ def fill_pmeteo(text, ctx):
         t = _sub_token(t, "<wrf_dir>", ctx["wrf_dir"])
     if ctx["wrf_date"]:
         t = _sub_token(t, "<prague_date>", ctx["wrf_date"])
-    t = t.replace("<domain_resolution>.0", f"{float(s.grid_size):.1f}")
+    t = t.replace("<domain_resolution>.0", fmt_real(s.grid_size))
     if ctx["nz"]:
         t = _sub_keyed(t, "nz", ctx["nz"], sep=":")
     if ctx["origin_time"]:
@@ -751,12 +854,11 @@ def make_p3dr(p3d_text):
 # ------------------------------
 # 5. WRITER
 # ------------------------------
-def _write(out_path, text, overwrite):
-    if out_path.exists() and not overwrite:
-        log.info(f"[templates] kept (exists): {out_path.name}")
-        return
+def _write(out_path, text):
     out_path.write_text(text)
-    left = len(_PLACEHOLDER_RE.findall(text)) + text.count("<>")
+    # The pattern matches the bare `<>` too, so this counts each once (it
+    # used to add text.count("<>") on top and report them twice).
+    left = len(_PLACEHOLDER_RE.findall(text))
     note = f" ({left} placeholder(s) to fill)" if left else ""
     log.info(f"[templates] wrote {out_path.name}{note}")
 
@@ -805,6 +907,9 @@ def write_templates(child, parent, cfg, state=None):
 
     nested = tcfg.get("nested", True)
     case = tcfg["case"] or cfg["project"]["name"]
+    single_name = tcfg.get("single_domain", "parent")
+    specs = ({"parent": parent, "child": child} if nested else
+             {single_name: parent if single_name == "parent" else child})
     targets = ([f"{case}_p3d", f"{case}_p3d_N02", f"{case}_p3dr",
                 f"{case}_p3dr_N02", f"pgem_{case}.yaml",
                 f"pgem_{case}_N02.yaml", f"pmeteo_{case}.yaml",
@@ -814,82 +919,73 @@ def write_templates(child, parent, cfg, state=None):
     write_submit = bool(tcfg.get("submit", True))
     if write_submit:
         targets.append(f"submit_{case}.sh")
-    if not overwrite and all((out_dir / t).exists() for t in targets):
-        log.info("[templates] kept (all files exist)")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    todo = _plan_set(out_dir, case, targets, specs, nested, single_name,
+                     tcfg["values"], overwrite, state)
+    if not todo:
         return
 
     _resolve_topology(child, parent, cfg, nested, state)
 
-    progress("Writing run configuration files ({} files)",
-             len(targets))
+    def put(name, text):
+        if name in todo:
+            _write(out_dir / name, text)
+
+    progress("Writing run configuration files ({} files)", len(todo))
+    # templates.cyclic switches the p3d skeletons to the cyclic-boundary
+    # variants (no offline nesting, flow driven internally)
+    var = "cyclic_" if tcfg.get("cyclic") else ""
+    if var and not _WARNED.get("cyclic"):
+        _WARNED["cyclic"] = True
+        # Review the flow driving (ug/vg_surface, dp_external/dpdxy),
+        # y_shift and disturbances before a production run.
+        log.warning("[templates] cyclic p3d is a STARTING SKELETON "
+                    "(TODO) - review flow driving and y_shift.")
     if nested:
         pctx = build_context(parent, cfg, other=child)
         cctx = build_context(child, cfg, other=parent)
         case = pctx["case"]
-
-        # templates.cyclic switches the p3d skeletons to the cyclic-
-        # boundary variants (no offline nesting, flow driven internally)
-        var = "cyclic_" if tcfg.get("cyclic") else ""
-        if var and not _WARNED.get("cyclic"):
-            _WARNED["cyclic"] = True
-            # Review the flow driving (ug/vg_surface, dp_external/dpdxy),
-            # y_shift and disturbances before a production run.
-            log.warning("[templates] cyclic p3d is a STARTING SKELETON "
-                        "(TODO) - review flow driving and y_shift.")
         p3d_parent = fill_p3d(read(f"template_{var}nested_p3d"), pctx,
                               child_ctx=cctx)
         p3d_child = fill_p3d(read(f"template_{var}nested_p3d_N02"), cctx)
-        _write(out_dir / f"{case}_p3d", p3d_parent, overwrite)
-        _write(out_dir / f"{case}_p3d_N02", p3d_child, overwrite)
-        _write(out_dir / f"{case}_p3dr", make_p3dr(p3d_parent), overwrite)
-        _write(out_dir / f"{case}_p3dr_N02", make_p3dr(p3d_child), overwrite)
-
-        _write(out_dir / f"pgem_{case}.yaml",
-               fill_pgem(read("pgem_template_nested.yaml"), pctx), overwrite)
-        _write(out_dir / f"pgem_{case}_N02.yaml",
-               fill_pgem(read("pgem_template_nested_N02.yaml"), cctx), overwrite)
-        _write(out_dir / f"pmeteo_{case}.yaml",
-               fill_pmeteo(read("pmeteo_template_nested.yaml"), pctx), overwrite)
-        _write(out_dir / f"pmeteo_{case}_N02.yaml",
-               fill_pmeteo(read("pmeteo_template_nested_N02.yaml"), cctx), overwrite)
+        put(f"{case}_p3d", p3d_parent)
+        put(f"{case}_p3d_N02", p3d_child)
+        put(f"{case}_p3dr", make_p3dr(p3d_parent))
+        put(f"{case}_p3dr_N02", make_p3dr(p3d_child))
+        put(f"pgem_{case}.yaml",
+            fill_pgem(read("pgem_template_nested.yaml"), pctx))
+        put(f"pgem_{case}_N02.yaml",
+            fill_pgem(read("pgem_template_nested_N02.yaml"), cctx))
+        put(f"pmeteo_{case}.yaml",
+            fill_pmeteo(read("pmeteo_template_nested.yaml"), pctx))
+        put(f"pmeteo_{case}_N02.yaml",
+            fill_pmeteo(read("pmeteo_template_nested_N02.yaml"), cctx))
         nz_resolved = {"parent": pctx["nz"], "child": cctx["nz"]}
     else:
-        spec = parent if tcfg.get("single_domain", "parent") == "parent" else child
+        spec = specs[single_name]
         ctx = build_context(spec, cfg)
         case = ctx["case"]
         nz_resolved = {spec.name: ctx["nz"]}
-        var = "cyclic_" if tcfg.get("cyclic") else ""
-        if var and not _WARNED.get("cyclic"):
-            _WARNED["cyclic"] = True
-            # Review the flow driving (ug/vg_surface, dp_external/dpdxy),
-            # y_shift and disturbances before a production run.
-            log.warning("[templates] cyclic p3d is a STARTING SKELETON "
-                        "(TODO) - review flow driving and y_shift.")
         p3d = fill_p3d(read(f"template_{var}p3d"), ctx)
-        _write(out_dir / f"{case}_p3d", p3d, overwrite)
-        _write(out_dir / f"{case}_p3dr", make_p3dr(p3d), overwrite)
-        _write(out_dir / f"pgem_{case}.yaml",
-               fill_pgem(read("pgem_template.yaml"), ctx), overwrite)
-        _write(out_dir / f"pmeteo_{case}.yaml",
-               fill_pmeteo(read("pmeteo_template.yaml"), ctx), overwrite)
+        put(f"{case}_p3d", p3d)
+        put(f"{case}_p3dr", make_p3dr(p3d))
+        put(f"pgem_{case}.yaml", fill_pgem(read("pgem_template.yaml"), ctx))
+        put(f"pmeteo_{case}.yaml",
+            fill_pmeteo(read("pmeteo_template.yaml"), ctx))
 
     # -- palmrun submit script ----------------------------------------
     # -X must equal the TOTAL number of MPI processes: for a nested run that
     # is parent + child, not either one alone.
+    tv = tcfg["values"]
     if write_submit:
-        tv = tcfg["values"]
-        if nested:
-            total_cores = ((tv.get("npex_parent") or 0) * (tv.get("npey_parent") or 0)
-                           + (tv.get("npex_child") or 0) * (tv.get("npey_child") or 0))
-        else:
-            dname = tcfg.get("single_domain", "parent")
-            total_cores = ((tv.get(f"npex_{dname}") or 0)
-                           * (tv.get(f"npey_{dname}") or 0))
+        total_cores = sum((tv.get(f"npex_{n}") or 0) * (tv.get(f"npey_{n}") or 0)
+                          for n in specs)
         sub_path = out_dir / f"submit_{case}.sh"
-        _write(sub_path, fill_submit(read("submit_template.sh"), cfg, case,
-                                     total_cores or None), overwrite)
+        put(sub_path.name, fill_submit(read("submit_template.sh"), cfg, case,
+                                       total_cores or None))
         if sub_path.exists():
             sub_path.chmod(sub_path.stat().st_mode | 0o111)   # make executable
+    _write_record(out_dir, case, nested, single_name, specs, tv, nz_resolved)
 
     missing = [k for k in ("origin_time", "length", "wrf_date",
                            "hpc_user", "wrf_dir")
@@ -908,3 +1004,215 @@ def write_templates(child, parent, cfg, state=None):
     if missing:
         log.warning(f"[templates] not set in templates.values: "
                     f"{', '.join(missing)} - placeholders left.")
+
+
+# ------------------------------
+# 6. THE GENERATED SET: WHAT IS KEPT, WHAT IS (RE)WRITTEN
+# ------------------------------
+# Generated files are never overwritten (they may carry hand edits), but a
+# kept file must still describe THIS case. Each set records the geometry,
+# topology and nz it was written for in palm_preproc_templates_<case>.json;
+# sets written before the record existed are read back from their own
+# _p3d and pgem files instead.
+
+def _record_path(out_dir, case):
+    return out_dir / f"palm_preproc_templates_{case}.json"
+
+
+def _geometry(spec):
+    return {"grid_size": float(spec.grid_size),
+            "origin_x": round(float(spec.origin_x), 6),
+            "origin_y": round(float(spec.origin_y), 6),
+            "width_pts": int(spec.width_pts),
+            "height_pts": int(spec.height_pts)}
+
+
+def _uncommented(path, mark):
+    return "\n".join(line.split(mark, 1)[0]
+                     for line in path.read_text().splitlines())
+
+
+def _p3d_values(path):
+    """nx, ny, nz, npex, npey and - in a nested parent - the child's
+    llx/lly, read back from a written _p3d (None where absent or still a
+    placeholder)."""
+    text = _uncommented(path, "!")
+    out = {}
+    for key in ("nx", "ny", "nz", "npex", "npey"):
+        m = re.search(rf"(?<![A-Za-z0-9_]){key}\s*=\s*(\d+)\b", text)
+        out[key] = int(m.group(1)) if m else None
+    m = re.search(r"domain_layouts\s*=[^/]*?,\s*2\s*,\s*1\s*,\s*[^,]+,"
+                  r"\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)", text)
+    out["llx_lly"] = (float(m.group(1)), float(m.group(2))) if m else None
+    return out
+
+
+def _pgem_values(path):
+    """nx, ny (int) and cent_x, cent_y (float) read back from a pgem yaml."""
+    text = _uncommented(path, "#")
+    out = {}
+    for key, kind in (("nx", int), ("ny", int),
+                      ("cent_x", float), ("cent_y", float)):
+        m = re.search(rf"(?m)^\s*{key}\s*:\s*(-?[\d.]+)\s*$", text)
+        out[key] = kind(m.group(1)) if m else None
+    return out
+
+
+def _set_files(case, nested, single_name):
+    """{domain: (p3d name, pgem name)} of a set."""
+    if nested:
+        return {"parent": (f"{case}_p3d", f"pgem_{case}.yaml"),
+                "child": (f"{case}_p3d_N02", f"pgem_{case}_N02.yaml")}
+    return {single_name: (f"{case}_p3d", f"pgem_{case}.yaml")}
+
+
+def _read_record(out_dir, case, nested, single_name):
+    """The set's record, or what the existing files tell (legacy sets);
+    None when there is nothing to go on."""
+    path = _record_path(out_dir, case)
+    if path.exists():
+        try:
+            return json.loads(path.read_text())
+        except ValueError as exc:
+            log.warning(f"[templates] {path.name} unreadable ({exc}) - "
+                        f"checking the files themselves.")
+    rec = {"legacy": True, "domains": {}, "topology": {}, "nz": {}}
+    for name, (p3d, pgem) in _set_files(case, nested, single_name).items():
+        dom = {}
+        if (out_dir / p3d).exists():
+            v = _p3d_values(out_dir / p3d)
+            if v["nx"] is not None and v["ny"] is not None:
+                dom["width_pts"], dom["height_pts"] = v["nx"] + 1, v["ny"] + 1
+            if v["nz"]:
+                rec["nz"][name] = v["nz"]
+            for axis in ("npex", "npey"):
+                if v[axis]:
+                    rec["topology"][f"{axis}_{name}"] = v[axis]
+            if nested and name == "parent" and v["llx_lly"]:
+                rec["llx_lly"] = v["llx_lly"]
+        if (out_dir / pgem).exists():
+            v = _pgem_values(out_dir / pgem)
+            if v["cent_x"] is not None and v["cent_y"] is not None:
+                dom["centre"] = (v["cent_x"], v["cent_y"])
+        if dom:
+            rec["domains"][name] = dom
+    return rec if (rec["domains"] or rec["topology"] or rec["nz"]) else None
+
+
+def _stale_reason(rec, specs, nested, single_name):
+    """Why the existing set no longer describes this case, or None."""
+    if not rec.get("legacy"):
+        if rec.get("nested") != nested or (
+                not nested and rec.get("single_domain") != single_name):
+            return "nested / single_domain changed"
+        for name, spec in specs.items():
+            old, new = rec.get("domains", {}).get(name) or {}, _geometry(spec)
+            if any(k not in old or abs(float(old[k]) - v) > 1e-6
+                   for k, v in new.items()):
+                return f"{name} domain geometry changed"
+        return None
+    # Files written before the record existed: compare what they say.
+    for name, spec in specs.items():
+        d = rec["domains"].get(name, {})
+        if "width_pts" in d and (d["width_pts"], d["height_pts"]) != (
+                spec.width_pts, spec.height_pts):
+            return (f"{name} grid {d['width_pts']}x{d['height_pts']} -> "
+                    f"{spec.width_pts}x{spec.height_pts}")
+        if "centre" in d:
+            cx, cy = (spec.origin_x + spec.maxx) / 2, (spec.origin_y + spec.maxy) / 2
+            if max(abs(d["centre"][0] - cx), abs(d["centre"][1] - cy)) > 0.0011:
+                return f"{name} domain moved"
+    if nested and rec.get("llx_lly"):
+        llx = specs["child"].origin_x - specs["parent"].origin_x
+        lly = specs["child"].origin_y - specs["parent"].origin_y
+        # written with one decimal before 1.4
+        if max(abs(rec["llx_lly"][0] - llx), abs(rec["llx_lly"][1] - lly)) > 0.051:
+            return "child offset in the parent changed"
+    return None
+
+
+def _pgem_points_stale(path, spec):
+    """Why a pgem yaml's nx/ny don't match the domain, or None. Before
+    1.3.1 pgem got the _p3d's nx (points - 1), which PALM-GeM reads as a
+    point count, so those static drivers came out one column short."""
+    v = _pgem_values(path)
+    if v["nx"] is None or v["ny"] is None:
+        return None
+    if (v["nx"], v["ny"]) == (spec.width_pts, spec.height_pts):
+        return None
+    if (v["nx"], v["ny"]) == (spec.width_pts - 1, spec.height_pts - 1):
+        return "pgem nx/ny written as points - 1 (palm_preproc < 1.3.1)"
+    return f"pgem nx/ny {v['nx']}x{v['ny']} != {spec.width_pts}x{spec.height_pts}"
+
+
+def _adopt_recorded(tv, rec, specs):
+    """Files written now must match the kept ones: take their topology and
+    nz, warning where the config asks for something else."""
+    wanted = {k: v for k, v in rec.get("topology", {}).items()
+              if k.rsplit("_", 1)[1] in specs}
+    wanted.update({f"nz_{n}": v for n, v in rec.get("nz", {}).items()
+                   if n in specs})
+    for key, val in wanted.items():
+        cur = tv.get(key)
+        if cur is not None and cur != val:
+            log.warning(f"[templates] templates.values.{key} = {cur} but the "
+                        f"existing files use {val}; they are kept, so the "
+                        f"files written now use {val} too. Delete the set "
+                        f"to regenerate it with {cur}.")
+        tv[key] = val
+
+
+def _write_record(out_dir, case, nested, single_name, specs, tv, nz):
+    from .. import __version__
+    rec = {"palm_preproc": __version__, "case": case, "nested": nested,
+           "single_domain": None if nested else single_name,
+           "domains": {n: _geometry(s) for n, s in specs.items()},
+           "topology": {k: tv[k] for k in _TOPO_KEYS
+                        if tv.get(k) and k.rsplit("_", 1)[1] in specs},
+           "nz": {n: v for n, v in nz.items() if v}}
+    _record_path(out_dir, case).write_text(json.dumps(rec, indent=2) + "\n")
+
+
+def _plan_set(out_dir, case, targets, specs, nested, single_name, tv,
+              overwrite, state):
+    """Which files of the set to (re)write. Existing files are kept unless
+    they no longer describe this case: then they are moved to
+    _superseded/<time>/ and rewritten, with a warning (they used to be kept
+    with an info line, so a changed buffer left _p3d files with the old
+    nx/ny and child offset next to data for the new domains). Files that
+    are written next to kept ones reuse the kept ones' topology and nz."""
+    existing = [t for t in targets if (out_dir / t).exists()]
+    if overwrite or not existing:
+        return list(targets)
+    rec = _read_record(out_dir, case, nested, single_name)
+    reason = _stale_reason(rec, specs, nested, single_name) if rec else None
+    stale = dict.fromkeys(existing, reason) if reason else {}
+    if not reason:
+        for name, (_, pgem) in _set_files(case, nested, single_name).items():
+            if pgem in existing:
+                why = _pgem_points_stale(out_dir / pgem, specs[name])
+                if why:
+                    stale[pgem] = why
+    keep = [t for t in existing if t not in stale]
+    for t in keep:
+        log.info(f"[templates] kept (exists): {t}")
+    if rec and not reason and keep:
+        _adopt_recorded(tv, rec, specs)
+    if stale:
+        backup = (out_dir / "_superseded"
+                  / datetime.now().strftime("%Y%m%d-%H%M%S"))
+        backup.mkdir(parents=True, exist_ok=True)
+        for t in stale:
+            shutil.move(str(out_dir / t), str(backup / t))
+        log.warning(f"[templates] {len(stale)} existing file(s) no longer "
+                    f"match this case ({next(iter(stale.values()))}) - "
+                    f"rewritten; the old ones are in "
+                    f"{backup.relative_to(out_dir)}/")
+    write = [t for t in targets if t not in keep]
+    if not write:
+        log.info("[templates] kept (all files exist)")
+        _persist_topology(tv, state)
+        if rec and rec.get("legacy"):
+            _write_record(out_dir, case, nested, single_name, specs, tv,
+                          {n: tv.get(f"nz_{n}") for n in specs})
+    return write

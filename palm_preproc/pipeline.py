@@ -351,7 +351,7 @@ def stage_merge(cfg, state):
                 tasks.append((key, merge_raster_task,
                               (str(user_src), str(clipped), str(out),
                                spec.to_dict(), priority_wkt, resampling,
-                               force_nodata)))
+                               force_nodata, mask_wkt.get(layer))))
             else:
                 if not clipped.exists():
                     log.warning(f"{_pretty(key)}: clipped raw layer "
@@ -471,7 +471,9 @@ def print_plan(cfg, state, stages):
         log.info(f"      {action}: {rel(path)}")
 
     log.info("Plan (dry run - nothing written):")
-    log.info(f"  domain input: {cfg['user_data']['domain']}")
+    src, kind = cfg.domain_source()
+    log.info(f"  domain input: {src}"
+             + ("" if kind == "domain" else "  (layer extent)"))
     for name in DOMAIN_NAMES:
         dc = cfg["domains"][name]
         log.info(f"  {name}: grid {dc['grid_size']:g} m, buffer "

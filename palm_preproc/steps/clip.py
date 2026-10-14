@@ -282,12 +282,15 @@ def mask_raster_to_vector_task(raster_path, vector_path, nodata):
 # 4. RASTER MERGE (user raster over clipped raw raster)
 # ------------------------------
 def merge_raster_task(user_src, raw_src, out, spec_dict, priority_wkt,
-                      resampling_name, force_nodata):
+                      resampling_name, force_nodata, mask_wkt=None):
     """Composite a user raster over the clipped raw raster on the domain's
     exact PALM grid: inside the priority footprint every cell is taken from
     the user raster (resampled), outside it from the raw raster. Cells that
     would be user-driven but where the user raster has nodata fall back to
-    raw so no holes are introduced. Returns a report string."""
+    raw so no holes are introduced. A per-layer mask (merge.masks, as WKT)
+    replaces the shared footprint, as it does for vector layers - it used
+    to be accepted for buildings and then ignored. Returns a report
+    string."""
     import geopandas as gpd
     import numpy as np
     from rasterio.features import geometry_mask
@@ -299,7 +302,7 @@ def merge_raster_task(user_src, raw_src, out, spec_dict, priority_wkt,
     user_src, raw_src, out = Path(user_src), Path(raw_src), Path(out)
     spec = DomainSpec.from_dict(spec_dict)
     resampling = Resampling[resampling_name]
-    prio = shapely_wkt.loads(priority_wkt)
+    prio = shapely_wkt.loads(mask_wkt if mask_wkt else priority_wkt)
 
     dst_transform = from_origin(spec.origin_x, spec.maxy,
                                 spec.grid_size, spec.grid_size)
@@ -345,5 +348,6 @@ def merge_raster_task(user_src, raw_src, out, spec_dict, priority_wkt,
 
     n_user = int(take_user.sum())
     frac = 100.0 * n_user / take_user.size if take_user.size else 0.0
+    where = "the layer's mask" if mask_wkt else "the footprint"
     return (f"OK {out.name}: user raster over raw ({frac:.1f}% of cells from "
-            f"user inside the footprint){proj_note}")
+            f"user inside {where}){proj_note}")

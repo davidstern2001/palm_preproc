@@ -13,6 +13,9 @@
 #   * In paths, {name} is replaced by project.name.
 #   * Paths are relative to project.root.
 #   * An unknown or misspelt setting stops the run with a suggestion.
+#   * null is a value where a comment offers it (domain: null, nz: null,
+#     node_cpus: null, ...) and then overrides project.defaults; on
+#     any other setting null just means "use the default".
 #
 # Copy to config/<project>.yaml and run:
 #   python run_preproc.py -c config/<project>.yaml
@@ -31,6 +34,9 @@ project:
     #defaults: 'defaults/default.yaml'   # site-wide values applied first;
                                  # false = none. Edit that file to change
                                  # the baseline for every new project.
+                                 # A relative path is looked up next to
+                                 # this file, then in the palm_preproc
+                                 # folder; a missing file is an error.
     #state_file: null            # null -> <output_dir>/palm_preproc_state.json
                                  # false -> no state file, no resume
                                  # or an explicit path (quote it)
@@ -100,8 +106,10 @@ domains:
         # terrain. The vertical extent is therefore nz x dz metres above
         # that base - the same reference palm_postproc's region.z_max
         # uses, so the two numbers are directly comparable.
-        # null = advanced.nz_factor x the tallest building above the
-        # base, rounded up to a multiple the multigrid solver accepts.
+        # null = advanced.grid.nz_factor x the MEAN rooftop height above
+        # the base, but at least advanced.grid.nz_tallest_factor x the
+        # TALLEST one, rounded up to a multiple the multigrid solver
+        # accepts.
         #nz: null
     parent:
         grid_size: 2.0
@@ -191,9 +199,11 @@ report:                          # domain geometry and &nesting_parameters
 
     # --- 7a. Grid -----------------------------------------------------
     #grid:
-        #nz_factor: 3.0          # domains.<d>.nz = this x the height of
-                                 # the tallest building above the domain
-                                 # base, when nz is null
+        #nz_factor: 4.0          # domains.child.nz = this x the MEAN
+                                 # rooftop height above the domain base,
+                                 # when nz is null (roughness sublayer)...
+        #nz_tallest_factor: 1.5  # ... but at least this x the TALLEST
+                                 # rooftop, so no building reaches the top
         #min_power: 3            # domain dims divisible by 2^3 = 8
                                  # (multigrid solver)
         #align_child_to_parent: true   # child origin + extent on the
@@ -261,7 +271,8 @@ report:                          # domain geometry and &nesting_parameters
         #raw_fill:
             #landcover: coverage
         # Optional per-layer mask polygon: that layer's OWN keep-user
-        # boundary, overriding the shared domain footprint for it alone.
+        # boundary, overriding the shared domain footprint for it alone
+        # (any user-supplied layer, buildings included; not dem).
         # Paths resolve against input.user_data.dir (bare filename) or
         # project.root (a path). There is no implicit mask_<layer>.shp
         # convention - a mask applies only when pointed at a real file.

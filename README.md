@@ -152,6 +152,8 @@ is a sibling of the per-project directories, shared by all of them:
     ├── pgem_<case>.yaml, pgem_<case>_N02.yaml
     ├── pmeteo_<case>.yaml, pmeteo_<case>_N02.yaml
     ├── domains_report.txt
+    ├── palm_preproc_templates_<case>.json   what the run files were made for
+    ├── _superseded/<time>/            run files replaced because the case changed
     ├── palm_preproc.log               run log (--log-file to move/disable)
     └── palm_preproc_state.json
 ```
@@ -174,6 +176,7 @@ your layers in it, copy `template.yaml` to `config/<project>.yaml`, point
 | `domains_report.txt` | report | Case summary, nesting validation, `&nesting_parameters`, a summary table, and a provenance header (version, config path, config hash, command line) |
 | `palm_preproc.log` | — | Full run log, including the topology and child-sizing decisions. Move it with `--log-file PATH`, disable with `--log-file ''` |
 | `palm_preproc_state.json` | — | Resume state |
+| `palm_preproc_templates_<case>.json` | templates | The domain geometry, topology and `nz` the run files were generated for; used to detect run files that no longer match the case |
 
 With `templates.nested: false` only the single-domain set is produced (`<case>_p3d`, `<case>_p3dr`, `pgem_<case>.yaml`, `pmeteo_<case>.yaml`), using the domain named in `templates.single_domain`.
 
@@ -194,7 +197,7 @@ Later layers override earlier ones, and the merge is **deep** — you can overri
 - **`defaults/default.yaml`** is the baseline for *every* project on this machine. Put things here that rarely change between projects: buffers, resampling methods, `raw_fill` rules, cluster facts (`node_cpus`, node limits), boundary-cleanup settings, `nz` auto-calc factors, the stage list. The run-configuration skeletons it points at live in `defaults/templates/`.
 - **`config/<project>.yaml`** then only needs to state what's genuinely project-specific: name, root, output directory, your `input.user_data` layers, simulation time (`run.origin_time`, `run.length`, `run.wrf_date`), and any deliberate override of a default.
 
-To skip the site defaults for one project use `project.no_defaults: true`; to point at a different defaults file use `project.defaults_file: <path>`. The fully-commented `template.yaml` documents every setting and works as a standalone config too.
+To skip the site defaults for one project use `project.defaults: false` (`project.no_defaults: true` in the pre-1.3 layout); to point at a different defaults file use `project.defaults: <path>` (`project.defaults_file`). A relative path is looked up next to the config file, then in the palm_preproc folder, and a file named there that does not exist is an error. The fully-commented `template.yaml` documents every setting and works as a standalone config too.
 
 ### Key options
 
@@ -251,7 +254,7 @@ Where you supply a layer, it takes priority inside the area of interest and the 
 - **`difference`** (default) cuts raw geometry along the priority boundary, so the seam has neither gaps nor overlaps. Per-layer `raw_fill` controls how raw is removed: `coverage` (cut raw exactly along your geometry — right for wall-to-wall layers like landcover) or `footprint` (drop *all* raw inside the domain footprint — right for buildings/roofs/walls/trees, whose inter-feature gaps are streets that must stay empty).
 - **`predicate`** keeps whole features by a spatial predicate (the original behaviour).
 
-Post-merge cleanup: `fix_geometry` runs `buffer(0)` on polygon layers; `int_columns` casts attributes to nullable Int64; `reassign_id` regenerates unique 1..N ids so user and raw features never collide; `mark_user_column` records provenance (1 = user, 0 = raw). A per-layer **mask** (`advanced.merge.masks`, e.g. `trees: mask_trees.shp`) can give one layer its own keep-user boundary, different from the shared domain footprint.
+Post-merge cleanup: `fix_geometry` runs `buffer(0)` on polygon layers; `int_columns` casts attributes to nullable Int64; `reassign_id` regenerates unique 1..N ids so user and raw features never collide; `mark_user_column` records provenance (1 = user, 0 = raw). A per-layer **mask** (`advanced.merge.masks`, e.g. `trees: mask_trees.shp`) can give one user-supplied layer - the four vector layers or `buildings` - its own keep-user boundary, different from the shared domain footprint.
 
 ### boundary — cleaning up sliced buildings
 
@@ -272,7 +275,7 @@ This stage fills the run-configuration skeletons in `defaults/templates/` for th
 
 **`nz` is calculated for you** unless you set `nz_parent`/`nz_child` explicitly:
 
-- **Child** `nz` targets the roughness sublayer: `dz·nz = child_nz_height_factor × mean absolute rooftop height`. Each building cell's rooftop is `terrain + building_height`, referenced to the domain's *lowest* terrain point — the same datum PALM's static driver uses (`min(zt) → z = 0`). The mean is taken over building cells only, so a bare hill in the domain does not inflate `nz`, while buildings standing above the domain floor count at their true absolute height. This needs the DEM and buildings rasters on the same grid (guaranteed with `clip.snap_rasters_to_grid: true`); if they aren't aligned, or there's no DEM, it falls back to the plain above-terrain building height and says so in the log.
+- **Child** `nz` targets the roughness sublayer: `dz·nz = child_nz_height_factor × mean absolute rooftop height` (`advanced.grid.nz_factor`, default 4), but never less than `child_nz_tallest_factor × tallest absolute rooftop height` (`advanced.grid.nz_tallest_factor`, default 1.5), so a single tower among low blocks cannot reach the model top. The log says which of the two set `nz`. Each building cell's rooftop is `terrain + building_height`, referenced to the domain's *lowest* terrain point — the same datum PALM's static driver uses (`min(zt) → z = 0`). The mean is taken over building cells only, so a bare hill in the domain does not inflate `nz`, while buildings standing above the domain floor count at their true absolute height. This needs the DEM and buildings rasters on the same grid (guaranteed with `clip.snap_rasters_to_grid: true`); if they aren't aligned, or there's no DEM, it falls back to the plain above-terrain building height and says so in the log.
 - **Parent** `nz` targets `parent_target_height_m` (~2000 m).
 
 `nz` is then snapped up to a multiple of the domain's multigrid stride (`2^min_power`). Both factors live in `templates.values`, and an explicit `nz_parent`/`nz_child` overrides the calculation entirely.
@@ -281,7 +284,7 @@ This stage fills the run-configuration skeletons in `defaults/templates/` for th
 
 The recommendation favours **efficient node usage**: with `node_cpus` set, a job is billed `ceil(cores / node_cpus)` whole nodes, so a layout landing just *below* a whole-node boundary (e.g. 14.85 nodes) packs better than one just above (14.03) and is preferred; ties break toward more cores. Set `npes_parent`/`npes_child` to steer toward target core counts instead, or pin `npex_*`/`npey_*` to bypass the chooser. `min_nodes`/`max_nodes` hide layouts outside your node window. In non-interactive runs the recommendation is taken automatically. The chosen topology is saved in the state and is what the report documents, so the report always reflects the actual run.
 
-Generated files are **never overwritten** on reruns unless you set `templates.overwrite: true`, and the `templates:` section is excluded from the resume-state hash.
+Generated files are **kept** on reruns (they may carry hand edits) unless you set `project.overwrite: true`, and the `templates:` section is excluded from the resume-state hash. Kept files must still describe the case, though: if the domain geometry changed since they were written (a different buffer, grid or area of interest), the whole set is moved to `_superseded/<time>/` and regenerated, with a warning. A pgem file still in the pre-1.3.1 `nx`/`ny` convention is replaced the same way. Files that are missing from an otherwise current set are written with the topology and `nz` of the kept ones, so the set stays consistent; if the config now asks for a different topology or `nz`, a warning says so - delete the set to regenerate it with the new values.
 
 ### report — the &nesting_parameters block
 

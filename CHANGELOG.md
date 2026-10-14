@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.4.0
+
+**Correctness**
+
+- Run files no longer go stale silently. Each set records the domain
+  geometry, topology and `nz` it was written for
+  (`palm_preproc_templates_<case>.json`; older sets are read back from
+  their own `_p3d` and pgem files). When the geometry changed - a
+  different buffer, grid or area of interest - the existing files are
+  moved to `_superseded/<time>/` and the set is regenerated, with a
+  warning. They used to be kept with an info line, leaving `_p3d` files
+  with the old `nx`/`ny` and child offset next to data for the new
+  domains. A pgem file still in the pre-1.3.1 `nx`/`ny` convention is
+  replaced the same way. Files missing from an otherwise current set are
+  written with the kept files' topology and `nz` instead of a new choice
+  (the submit script's `-X` could stop matching the `_p3d`), and the
+  report shows the real core counts when all files were kept.
+- `null` in the new layout overrides the site defaults where it means
+  something: `input.user_data.domain: null` now selects `domain_from`
+  (config/example_minimal.yaml and config/palmovka.yaml stopped with
+  "Domain shapefile not found"), and `run.*`, `cluster.*` (including
+  entries of `nodes` / `cores`), `domains.<d>.nz`, the npex/npey pins,
+  `templates.case`, `report.file` and `advanced.templates_dir` can be
+  cleared. Elsewhere `null` still means "use the default".
+- `project.defaults: false` and `project.defaults: <path>` are honoured;
+  the site defaults were looked up before the new layout was translated,
+  so both were ignored. A relative path is looked up next to the config,
+  then in the palm_preproc folder; a missing file is an error.
+- The child rectangle always covers the area of interest. Centring first
+  and then flooring the origin onto the parent grid left up to one parent
+  cell of the area outside the child on the east/north side, in about
+  three of four cases. Existing projects keep their saved geometry until
+  rerun with `--force`.
+- Child `nz` is at least `nz_tallest_factor` (default 1.5) x the tallest
+  absolute rooftop, as well as `nz_factor` x the mean one, so a single
+  tower among low blocks cannot reach the model top. New setting
+  `advanced.grid.nz_tallest_factor` (`templates.values.
+  child_nz_tallest_factor` in the pre-1.3 layout); the log says which
+  rule set `nz`.
+- Pinning only some of npex/npey restricts the topology chooser to
+  layouts that agree with the pins; they used to be overwritten
+  silently. A pin that does not divide the domain's grid points is an
+  error, one outside the recommended rules a warning.
+- `advanced.merge.masks.buildings` bounds the buildings-raster merge; it
+  was accepted and ignored. Masks for `dem` are rejected, and a mask for
+  a layer without user data is reported.
+- Boundary cleanup removes line and point walls of the removed buildings
+  (a wall drawn on a roof outline never matched); walls on an edge shared
+  with a kept building stay.
+- Grid spacings and offsets keep all their digits in the `_p3d`,
+  pmeteo and the report's `&nesting_parameters` (dx = 0.25 was written
+  as 0.2); placeholders are no longer counted twice; "nothing to merge."
+  is no longer renamed to "advanced.merge."; the dry run shows the area
+  of interest source when it comes from a layer; the "no topology" hint
+  names real settings.
+
 ## 1.3.1
 
 **Correctness**

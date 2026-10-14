@@ -15,7 +15,8 @@ changing npes etc. does not invalidate the pipeline state).
 from datetime import datetime
 from pathlib import Path
 
-from .domains import npe, valid_pairs
+from .domains import valid_pairs
+from .templates import fmt_real
 from ..log import get_logger
 
 log = get_logger()
@@ -120,12 +121,12 @@ def _nesting_section(child, parent, rcfg, npes, strict=True):
     npes_p, npes_c = npes["parent"], npes["child"]
     name_w = max(len(pname), len(cname)) + 2
     npes_w = max(len(str(npes_p)), len(str(npes_c)))
-    ll_w = max(len(f"{llx:.1f}"), len(f"{lly:.1f}"), len("0.0"))
+    ll_w = max(len(fmt_real(llx)), len(fmt_real(lly)), len("0.0"))
 
     def row(name, dom_id, par_id, npes, x, y):
         return (f"'{name}'{',' + ' ' * (name_w - len(name) - 1)}"
                 f" {dom_id:>2},  {par_id:>2}, {npes:>{npes_w}}, "
-                f"{x:>{ll_w}.1f}, {y:>{ll_w}.1f},")
+                f"{fmt_real(x):>{ll_w}}, {fmt_real(y):>{ll_w}},")
 
     indent = " " * 21
     L.append("---- &nesting_parameters ----")
@@ -159,8 +160,8 @@ def _summary_table(child, parent, rcfg, npes, llx, lly, gsr):
         ("dx = dy [m]", f"{parent.grid_size:g}", f"{child.grid_size:g}"),
         ("domain extent x [m]", f"{parent.width_m:.1f}", f"{child.width_m:.1f}"),
         ("domain extent y [m]", f"{parent.height_m:.1f}", f"{child.height_m:.1f}"),
-        ("lower_left_x (llx) [m]", "0.0", f"{llx:.1f}"),
-        ("lower_left_y (lly) [m]", "0.0", f"{lly:.1f}"),
+        ("lower_left_x (llx) [m]", "0.0", fmt_real(llx)),
+        ("lower_left_y (lly) [m]", "0.0", fmt_real(lly)),
         ("GSR (parent_dx/child_dx)", "-", f"{gsr:g}"),
     ]
     for name, p, c in rows:

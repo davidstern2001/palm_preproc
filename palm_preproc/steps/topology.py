@@ -246,8 +246,9 @@ def choose_topology(configs, recommended, mode="ask", node_cpus=None,
           "auto" -> always take the recommendation silently.
     """
     if not configs:
-        log.warning("[topology] no valid processor topology found "
-                    "(try opt=False, as in --no_opt)")
+        log.warning("[topology] no valid processor topology found (relax "
+                    "domains.<d>.topology_opt, or widen "
+                    "templates.values.min_nodes/max_nodes)")
         return None
     interactive = (interactive_override if interactive_override is not None
                    else sys.stdin.isatty())

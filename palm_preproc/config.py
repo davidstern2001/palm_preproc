@@ -256,6 +256,20 @@ class Config:
         self.yaml_path = Path(yaml_path).resolve()
         raw = yaml.safe_load(self.yaml_path.read_text()) or {}
 
+        # The site defaults may be written in either layout, and so may this
+        # config; each is translated on its own before they are merged. This
+        # config is translated FIRST: the new layout names the defaults file
+        # `project.defaults`, which only becomes project.defaults_file /
+        # no_defaults through the translation.
+        raw, notes = self._translate(raw, self.yaml_path)
+        self.layout = "new" if notes is not None else "legacy"
+        from .layout import to_new_names
+        from .log import set_message_names
+        # Messages (config errors included) speak this config's vocabulary.
+        set_message_names(to_new_names if self.layout == "new" else None)
+        for note in notes or ():
+            log.info(f"[config] {note}")
+
         house = {}
         house_path = self._house_defaults_path(raw)
         if house_path and house_path.exists():
@@ -263,18 +277,7 @@ class Config:
             log.debug(f"[config] site defaults: {house_path}")
         elif house_path:
             log.debug(f"[config] no site defaults file at {house_path}")
-
-        # The site defaults may be written in either layout, and so may this
-        # config; each is translated on its own before they are merged.
         house, _ = self._translate(house, house_path)
-        raw, notes = self._translate(raw, self.yaml_path)
-        self.layout = "new" if notes is not None else "legacy"
-        if self.layout == "new":
-            from .layout import to_new_names
-            from .log import set_message_names
-            set_message_names(to_new_names)
-            for note in notes:
-                log.info(f"[config] {note}")
 
         self.d = _deep_merge(DEFAULTS, house)
         self.d = _deep_merge(self.d, raw)
@@ -308,8 +311,22 @@ class Config:
             return None
         override = pcfg.get("defaults_file")
         if override:
+            # A relative path is looked up next to this config first, then
+            # in the palm_preproc folder (where defaults/default.yaml lives).
+            # A file named explicitly must exist: silently running without
+            # the defaults someone asked for is the worse failure.
             p = Path(override)
-            return p if p.is_absolute() else (self.yaml_path.parent / p).resolve()
+            bases = ([] if p.is_absolute() else
+                     [self.yaml_path.parent, self.DEFAULT_CONFIG_DIR.parent])
+            for cand in ([p] if p.is_absolute() else
+                         [(b / p).resolve() for b in bases]):
+                if cand.exists():
+                    return cand
+            raise ConfigError(
+                f"Site defaults file not found: {override} (looked in "
+                + (", ".join(str(b) for b in bases) or "that absolute path")
+                + "). Fix project.defaults_file, or remove it to use "
+                f"{self.DEFAULT_CONFIG_DIR / 'default.yaml'}.")
         return self.DEFAULT_CONFIG_DIR / "default.yaml"
 
     def _resolve(self, p):
@@ -391,10 +408,16 @@ class Config:
         dfrom = d["user_data"].get("domain_from")
         if d["user_data"]["domain"]:
             if not Path(d["user_data"]["domain"]).exists():
+                # domain wins over domain_from, so with domain_from already
+                # set the fix is to null the domain, not to set domain_from.
+                hint = (f"set user_data.domain: null to derive it from "
+                        f"user_data.domain_from ('{dfrom}')" if dfrom else
+                        "or set user_data.domain: null and "
+                        "user_data.domain_from")
                 raise ConfigError(
                     f"Domain shapefile not found: {d['user_data']['domain']} "
-                    f"(place domain.shp in user_data.dir, set "
-                    f"user_data.domain explicitly, or use user_data.domain_from)."
+                    f"(place domain.shp in user_data.dir, point "
+                    f"user_data.domain at it, {hint})."
                 )
         elif dfrom:
             if dfrom not in d["user_data"]["layers"]:
@@ -421,11 +444,17 @@ class Config:
             if name not in d["raw_data"]["layers"]:
                 raise ConfigError(f"raw_data.layers.{name} missing from config.")
         for layer, p in d["merge"].get("masks", {}).items():
-            if layer not in ALL_LAYERS:
-                raise ConfigError(f"merge.masks.{layer}: unknown layer "
-                                  f"(valid: {ALL_LAYERS}).")
+            # A mask bounds where USER data wins, so it only means something
+            # for layers that can be user-supplied (dem never is).
+            if layer not in user_mergeable:
+                raise ConfigError(f"merge.masks.{layer}: masks apply to "
+                                  f"user-supplied layers only "
+                                  f"(valid: {user_mergeable}).")
             if not Path(p).exists():
                 raise ConfigError(f"merge.masks.{layer} not found: {p}")
+            if layer not in d["user_data"]["layers"]:
+                log.warning(f"[config] merge.masks.{layer}: no user "
+                            f"{layer} layer, so the mask has no effect.")
         unknown = set(d["stages"]) - set(STAGES)
         if unknown:
             raise ConfigError(f"Unknown stage(s): {sorted(unknown)}; valid: {STAGES}")

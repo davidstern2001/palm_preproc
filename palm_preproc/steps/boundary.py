@@ -30,13 +30,8 @@ from ..log import get_logger
 
 log = get_logger()
 
-# Candidate building-id column names, in priority order.
-
 # ------------------------------
-# 1. ID COLUMN DETECTION
-# ------------------------------
-# ------------------------------
-# 2. LANDCOVER RELABELING
+# 1. LANDCOVER RELABELING
 # ------------------------------
 def _relabel_landcover(landcover, footprints, buffer_m, columns,
                        min_overlap_frac=0.5):
@@ -141,13 +136,50 @@ def _relabel_landcover(landcover, footprints, buffer_m, columns,
     return len(relabeled)
 
 
+def _walls_under(walls, removed_fp, kept_fp):
+    """Boolean mask of the walls (a GeoSeries) that belong to removed roofs.
+
+    Polygon walls: representative point (interior) inside the removed
+    footprint, or most of their area inside it - so a wall merely sharing
+    an edge with a removed roof stays.
+
+    Line and point walls: a wall drawn ON a roof outline lies on the
+    footprint's boundary, where `within` is false, so the representative-
+    point test never matched them and every line wall of a removed building
+    survived. They are matched by how much of them the removed footprint
+    covers (boundary included) instead; one covered just as much by a KEPT
+    roof sits on an edge two buildings share and is kept with that one.
+    """
+    reps = walls.representative_point()
+    wmask = reps.within(removed_fp)
+    poly = walls.geom_type.isin(["Polygon", "MultiPolygon"])
+    if poly.any():
+        inside_area = walls[poly].intersection(removed_fp).area
+        frac = inside_area / walls[poly].area.replace(0, pd.NA)
+        wmask[poly] = wmask[poly] | (frac > 0.5).fillna(False)
+    lines = walls.geom_type.isin(["LineString", "MultiLineString",
+                                  "LinearRing"])
+    if lines.any():
+        length = walls[lines].length.replace(0, pd.NA)
+        on_removed = (walls[lines].intersection(removed_fp).length
+                      / length > 0.5).fillna(False)
+        on_kept = (walls[lines].intersection(kept_fp).length
+                   / length > 0.5).fillna(False)
+        wmask[lines] = wmask[lines] | (on_removed & ~on_kept)
+    points = walls.geom_type.isin(["Point", "MultiPoint"])
+    if points.any():
+        wmask[points] = (walls[points].covered_by(removed_fp)
+                         & ~walls[points].covered_by(kept_fp))
+    return wmask.astype(bool)
+
+
 def _union(geoms):
     from shapely.ops import unary_union
     return unary_union(list(geoms))
 
 
 # ------------------------------
-# 3. PER-DOMAIN CLEANUP
+# 2. PER-DOMAIN CLEANUP
 # ------------------------------
 def clean_boundary(domain_name, cfg, spec):
     """Remove boundary-truncated buildings from one domain's final layers
@@ -190,22 +222,8 @@ def clean_boundary(domain_name, cfg, spec):
     if walls_path.exists() and not removed.empty:
         walls = gpd.read_file(walls_path)
         if not walls.empty:
-            # Test each wall by its representative point (guaranteed on the
-            # geometry, interior for polygons) so walls merely sharing an edge
-            # with a neighbouring removed footprint are not swept up, while a
-            # wall genuinely inside a removed roof is caught regardless of
-            # geometry type (polygon perimeter, line or point walls).
-            reps = walls.geometry.representative_point()
-            wmask = reps.within(removed_fp)
-            # Polygon walls that straddle in/out: also drop those whose
-            # majority area lies inside the removed footprint.
-            poly = walls.geom_type.isin(["Polygon", "MultiPolygon"])
-            if poly.any():
-                inside_area = walls.loc[poly].geometry.intersection(
-                    removed_fp).area
-                frac = inside_area / walls.loc[poly].geometry.area.replace(
-                    0, pd.NA)
-                wmask.loc[poly] = wmask.loc[poly] | (frac > 0.5).fillna(False)
+            wmask = _walls_under(walls.geometry, removed_fp,
+                                 kept.geometry.union_all())
             n_walls = int(wmask.sum())
             if n_walls:
                 walls[~wmask].to_file(walls_path)

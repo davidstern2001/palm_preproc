@@ -381,6 +381,53 @@ def verify_new_layout(tmp, main):
     return 0
 
 
+def verify_rerun_after_change(tmp, main):
+    """A rerun with a different parent buffer must not keep run files that
+    describe the old domains: they used to be kept ("never overwritten"),
+    leaving _p3d files whose nx/ny and child offset no longer matched the
+    regenerated data."""
+    import re
+    import geopandas as gpd
+    cfg_path = tmp / "test_rerun.yaml"
+    out = tmp / "test_rerun"
+
+    def run_with(buffer):
+        make_config(tmp, cfg_path, name="test_rerun", extra="""
+raw_data:
+  layers:
+    landcover: landcover.gpkg
+""")
+        text = cfg_path.read_text().replace("overwrite: true",
+                                            "overwrite: false")
+        cfg_path.write_text(text.replace("buffer: 40.0", f"buffer: {buffer}"))
+        print("-" * 70)
+        rc = main(["-c", str(cfg_path)])
+        print("-" * 70)
+        return rc
+
+    def nx(path, sep):
+        m = re.search(rf"(?m)^\s*nx\s*{sep}\s*(\d+)", path.read_text())
+        return int(m.group(1))
+
+    if run_with(40.0) != 0 or run_with(200.0) != 0:
+        print("FAILED: a rerun exited with an error.")
+        return 1
+    for dom, suffix in (("parent", ""), ("child", "_N02")):
+        want = int(gpd.read_file(out / f"domain_{dom}.shp")["nx"].iloc[0])
+        got = nx(out / f"test_rerun_p3d{suffix}", "=")
+        pgem = nx(out / f"pgem_test_rerun{suffix}.yaml", ":")
+        if got != want or pgem != want + 1:
+            print(f"FAILED: {dom} after the rerun: domain nx = {want}, "
+                  f"_p3d nx = {got}, pgem nx = {pgem} (want {want + 1}).")
+            return 1
+    if not list((out / "_superseded").glob("*/test_rerun_p3d")):
+        print("FAILED: the outdated _p3d was not kept in _superseded/.")
+        return 1
+    print("Phase 4 OK - a changed domain rewrites the run files "
+          "(old ones in _superseded/).")
+    return 0
+
+
 def run(keep=False):
     if not check_dependencies():
         return 1
@@ -468,6 +515,8 @@ raw_data:
               f"({n} features).")
 
         if verify_new_layout(tmp, main) != 0:
+            return 1
+        if verify_rerun_after_change(tmp, main) != 0:
             return 1
 
         print("\nOK - all phases passed.")
