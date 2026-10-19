@@ -9,7 +9,8 @@
 #   * Sections 1-6 are what a new project actually has to decide.
 #     Everything in 7. ADVANCED has a working default.
 #   * project.defaults is applied BEFORE this file, so a project config
-#     only states what is project-specific. See config/example_minimal.yaml.
+#     only states what is project-specific. See the minimal example in
+#     README.md (Configuration > Key options).
 #   * In paths, {name} is replaced by project.name.
 #   * Paths are relative to project.root.
 #   * An unknown or misspelt setting stops the run with a suggestion.

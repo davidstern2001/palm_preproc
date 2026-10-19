@@ -22,6 +22,11 @@ domains_report.txt
 *.log
 
 # ------------------------------
+# Project configs (local to each machine, never commit)
+# ------------------------------
+config/
+
+# ------------------------------
 # Geospatial data (never commit)
 # ------------------------------
 *.shp

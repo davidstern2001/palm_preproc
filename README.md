@@ -57,6 +57,8 @@ pip install -r requirements.txt
 python test.py
 
 # 3. Make a config from the annotated template, then edit it
+#    (config/ is git-ignored: project configs stay on your machine)
+mkdir -p config
 cp template.yaml config/my_project.yaml
 #    → set at least project.name and project.root
 
