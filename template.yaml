@@ -70,8 +70,10 @@ input:
     user_data:
         dir: '{name}/DATA_{name}'
         # Area of interest: an explicit domain.shp, or - with domain:
-        # null - derived from the full extent of domain_from (e.g.
-        # landcover). An explicit domain always wins.
+        # null - derived from the layer named in domain_from (e.g.
+        # landcover): the domains cover its full extent, and your data
+        # wins inside its outline, with holes and gaps narrower than
+        # one child grid cell filled. An explicit domain always wins.
         domain: 'domain.shp'     # filename in dir, a path, or null
         #domain_from: null       # e.g. landcover; used only if domain: null
         #layers:                 # same names and defaults as raw_data

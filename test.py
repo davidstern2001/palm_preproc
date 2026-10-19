@@ -428,6 +428,57 @@ raw_data:
     return 0
 
 
+def verify_domain_from_landcover(tmp, main):
+    """The palmovka setup: the area of interest comes from a user landcover
+    that leaves a building out, and a user buildings.tif re-measures that
+    building. The hole used to keep raw priority, so the raw height won."""
+    import geopandas as gpd
+    import rasterio
+    from shapely.geometry import box
+    user = tmp / "test_from_lc" / "DATA_user"
+    user.mkdir(parents=True)
+    bld = box(ORIGIN_X + 120, ORIGIN_Y + 180, ORIGIN_X + 160, ORIGIN_Y + 210)
+    aoi = box(ORIGIN_X + 100, ORIGIN_Y + 100, ORIGIN_X + 260, ORIGIN_Y + 260)
+    gpd.GeoDataFrame([{"lid": 1, "code": 3, "type": 3,
+                       "geometry": aoi.difference(bld)}],
+                     crs=CRS).to_file(user / "landcover.shp")
+    with rasterio.open(tmp / "DATA_raw" / "buildings.tif") as ds:
+        heights, profile = ds.read(1), ds.profile
+    heights[heights == 9.0] = 33.0               # that building, re-measured
+    with rasterio.open(user / "buildings.tif", "w", **profile) as ds:
+        ds.write(heights, 1)
+    cfg_path = tmp / "test_from_lc.yaml"
+    make_config(tmp, cfg_path, name="test_from_lc", extra="""
+raw_data:
+  layers:
+    landcover: landcover.gpkg
+""")
+    cfg_path.write_text(cfg_path.read_text()
+                        .replace("dir: ./test/DATA_user",
+                                 "dir: ./test_from_lc/DATA_user")
+                        .replace("domain: domain.shp",
+                                 "domain: null\n  domain_from: landcover\n"
+                                 "  layers:\n    buildings: buildings.tif"))
+    print("-" * 70)
+    rc = main(["-c", str(cfg_path)])
+    print("-" * 70)
+    if rc != 0:
+        print(f"FAILED: the domain_from run exited with status {rc}")
+        return 1
+    out = tmp / "test_from_lc" / "DATA_child" / "buildings.tif"
+    with rasterio.open(out) as ds:
+        r, c = ds.index(ORIGIN_X + 140, ORIGIN_Y + 195)
+        h = float(ds.read(1)[r, c])
+    if h != 33.0:
+        print(f"FAILED: the re-measured building is {h:g} m in DATA_child, "
+              f"not the user's 33 m (raw 9 m won inside the landcover's "
+              f"hole).")
+        return 1
+    print("Phase 5 OK - domain_from landcover: the user heights win under "
+          "buildings the landcover leaves out.")
+    return 0
+
+
 def run(keep=False):
     if not check_dependencies():
         return 1
@@ -517,6 +568,8 @@ raw_data:
         if verify_new_layout(tmp, main) != 0:
             return 1
         if verify_rerun_after_change(tmp, main) != 0:
+            return 1
+        if verify_domain_from_landcover(tmp, main) != 0:
             return 1
 
         print("\nOK - all phases passed.")

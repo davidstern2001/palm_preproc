@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.4.1
+
+**Correctness**
+
+- An area of interest derived from a layer (`input.user_data.domain_from`,
+  e.g. landcover) no longer keeps that layer's holes. The outline is now
+  the layer with interior holes filled and gaps narrower than one child
+  grid cell bridged. Inside a hole the raw data used to win: with a
+  landcover that leaves building footprints out, raw roofs survived next
+  to the user's own, and a user buildings.tif was ignored exactly under
+  the buildings (a re-measured 33 m building came out at its raw 9 m).
+  An explicit `domain.shp` is used as drawn. The fix applies the next
+  time the domains are computed (`--force`, a config change, or
+  `project.overwrite`).
+
 ## 1.4.0
 
 **Correctness**

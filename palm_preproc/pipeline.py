@@ -28,7 +28,8 @@ from .state import State, config_hash
 from .steps.clip import (clip_raster_task, clip_vector_task,
                          mask_raster_to_vector_task,
                          merge_raster_task)
-from .steps.domains import DomainSpec, make_child_spec, make_parent_spec
+from .steps.domains import (DomainSpec, make_child_spec, make_parent_spec,
+                            solid_outline)
 from .steps.merge import coalesce_task
 from .steps.boundary import clean_boundary
 from .steps.report import write_domain_report
@@ -125,14 +126,25 @@ def stage_domains(cfg, state):
     #     real, possibly slanted/irregular footprint), NOT its bounding box:
     #     a bbox of a rotated domain is far larger than the domain, which
     #     would strip raw from areas the user never covered. Areal sources use
-    #     their dissolved coverage; point/line sources fall back to the convex
-    #     hull. The optimization-enlarged ring is filled with raw either way.
+    #     their dissolved coverage with holes filled and sub-cell gaps
+    #     bridged (see solid_outline); point/line sources fall back to the
+    #     convex hull. The optimization-enlarged ring is filled with raw
+    #     either way.
     footprint = gdf_al.geometry.union_all()
     if float(getattr(footprint, "area", 0.0)) <= 0:
         # Point/line source (or a degenerate polygon): fall back to the hull
         # so there is an area to give the user priority over. An explicit
         # domain.shp is areal already, so this is a no-op for it.
         footprint = footprint.convex_hull
+    elif src_kind == "extent":
+        solid = solid_outline(footprint, cfg["domains"]["child"]["grid_size"])
+        added = solid.area - footprint.area
+        if added > 0.01:
+            log.info(f"[domains] area of interest from "
+                     f"{cfg['user_data']['domain_from']}: holes and gaps "
+                     f"under one child cell filled ({added:.0f} m2 added "
+                     f"to {footprint.area:.0f} m2)")
+        footprint = solid
     state.set_data("priority_wkt", footprint.wkt)
 
     # Per-layer merge masks -> store as WKT in the aligned CRS so merge

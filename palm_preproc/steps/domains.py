@@ -125,6 +125,31 @@ def best_palm_grid(width_pts, height_pts, stride, max_overhead=0.10, opt=True):
     return best[1], best[2], best[3]
 
 
+def solid_outline(geom, gap):
+    """The area a layer covers, as an area of interest: the geometry with
+    its interior holes filled and gaps narrower than `gap` bridged (a
+    morphological closing with square joins, so corners stay sharp).
+
+    A landcover that leaves building footprints out, or whose parcels were
+    digitised with small gaps between them, dissolves to a polygon full of
+    holes. Inside a hole raw data won: raw roofs survived next to the
+    user's own, and user building heights were ignored exactly under the
+    buildings. The outline never shrinks below `geom`."""
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+
+    if geom.is_empty or geom.area <= 0:
+        return geom
+    closed = geom
+    if gap > 0:
+        closed = (geom.buffer(gap / 2, join_style="mitre")
+                  .buffer(-gap / 2, join_style="mitre"))
+    closed = unary_union([closed, geom])
+    parts = getattr(closed, "geoms", [closed])
+    return unary_union([Polygon(p.exterior) for p in parts
+                        if p.geom_type == "Polygon" and not p.is_empty])
+
+
 # ------------------------------
 # 3. DOMAIN SPEC
 # ------------------------------

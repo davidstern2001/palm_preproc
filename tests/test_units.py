@@ -24,7 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from palm_preproc.steps.domains import (          # noqa: E402
     DomainSpec, NestingError, best_palm_grid, check_nesting,
     joint_topology_score, make_child_spec, make_parent_spec, npe, snap_up,
-    valid_pairs,
+    solid_outline, valid_pairs,
 )
 from palm_preproc.steps.templates import (        # noqa: E402
     _PLACEHOLDER_RE, _parse_hours, _pgem_points_stale, _p3d_values,
@@ -234,6 +234,38 @@ class TestSpecConstruction:
         c = make_child_spec((1.0, 1.0, 801.0, 801.0), cfg, "EPSG:32633",
                             parent_grid_size=4.0)
         assert c.origin_x <= 1.0 and c.maxx >= 801.0
+
+
+class TestSolidOutline:
+    """An area of interest derived from a layer (domain_from) must not keep
+    the layer's holes: raw data won inside them, so raw roofs survived next
+    to the user's and user heights were ignored under the buildings."""
+
+    def test_holes_are_filled(self):
+        from shapely.geometry import box
+        lc = box(0, 0, 100, 100).difference(box(40, 40, 50, 50))
+        out = solid_outline(lc, 1.0)
+        assert out.equals(box(0, 0, 100, 100))
+
+    def test_gaps_under_one_cell_are_bridged(self):
+        from shapely.geometry import box
+        from shapely.ops import unary_union
+        tiles = unary_union([box(x, y, x + 10, y + 10).buffer(-0.1, join_style="mitre")
+                             for x in range(0, 50, 10) for y in range(0, 50, 10)])
+        out = solid_outline(tiles, 1.0)
+        assert out.geom_type == "Polygon" and not out.interiors
+        assert math.isclose(out.area, 49.8 ** 2, rel_tol=1e-6)   # corners kept
+
+    def test_separate_areas_stay_separate(self):
+        from shapely.geometry import box
+        two = box(0, 0, 10, 10).union(box(15, 0, 25, 10))
+        out = solid_outline(two, 1.0)
+        assert out.geom_type == "MultiPolygon" and math.isclose(out.area, 200)
+
+    def test_never_smaller_than_the_layer(self):
+        from shapely.geometry import Polygon
+        jagged = Polygon([(0, 0), (30, 0), (30, 30), (15, 0.5), (0, 30)])
+        assert solid_outline(jagged, 1.0).contains(jagged)
 
 
 # ------------------------------
