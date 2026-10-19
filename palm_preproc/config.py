@@ -315,7 +315,7 @@ class Config:
             # in the palm_preproc folder (where defaults/default.yaml lives).
             # A file named explicitly must exist: silently running without
             # the defaults someone asked for is the worse failure.
-            p = Path(override)
+            p = Path(override).expanduser()
             bases = ([] if p.is_absolute() else
                      [self.yaml_path.parent, self.DEFAULT_CONFIG_DIR.parent])
             for cand in ([p] if p.is_absolute() else
@@ -330,16 +330,22 @@ class Config:
         return self.DEFAULT_CONFIG_DIR / "default.yaml"
 
     def _resolve(self, p):
-        p = Path(p)
+        # `~` is expanded everywhere: pathlib leaves it alone, so
+        # `root: ~/palm/DATA` used to resolve to <config dir>/~/palm/DATA.
+        p = Path(p).expanduser()
         return p if p.is_absolute() else (self.base_dir / p).resolve()
 
     def _resolve_paths(self):
         d = self.d
         root = d["project"].get("root")
         if root:
-            root = Path(root)
+            root = Path(root).expanduser()
             self.base_dir = (root if root.is_absolute()
                              else (self.yaml_path.parent / root).resolve())
+            if not self.base_dir.is_dir():
+                raise ConfigError(
+                    f"project.root not found: {self.base_dir} (a relative "
+                    f"root is taken from the config file's folder).")
         else:
             self.base_dir = self.yaml_path.parent
         d["project"]["root"] = str(self.base_dir)
@@ -374,7 +380,7 @@ class Config:
 
         def in_dir(base, value):
             """Resolve a filename against `base`, a path against the root."""
-            p = Path(value)
+            p = Path(value).expanduser()
             if p.is_absolute() or len(p.parts) > 1:
                 return self._resolve(value)
             return base / value
@@ -386,11 +392,14 @@ class Config:
         else:
             d["user_data"]["domain"] = None
         # A user layer participates when its resolved file exists; `false`
-        # disables it explicitly.
-        d["user_data"]["layers"] = {
+        # disables it explicitly. Where each one was looked for is kept for
+        # the error messages.
+        self._user_layer_paths = {
             k: in_dir(user_dir, v)
-            for k, v in (d["user_data"]["layers"] or {}).items()
-            if v and in_dir(user_dir, v).exists()
+            for k, v in (d["user_data"]["layers"] or {}).items() if v
+        }
+        d["user_data"]["layers"] = {
+            k: p for k, p in self._user_layer_paths.items() if p.exists()
         }
         d["raw_data"]["dir"] = self._resolve(d["raw_data"]["dir"])
         d["merge"]["masks"] = {
@@ -421,11 +430,15 @@ class Config:
                 )
         elif dfrom:
             if dfrom not in d["user_data"]["layers"]:
+                where = self._user_layer_paths.get(dfrom)
+                why = (f"{where} does not exist" if where else
+                       "that layer is switched off or not a user layer")
+                if where and not Path(d["user_data"]["dir"]).is_dir():
+                    why += (f" - user_data.dir {d['user_data']['dir']} is "
+                            f"missing altogether")
                 raise ConfigError(
-                    f"user_data.domain_from = '{dfrom}' but that layer is not "
-                    f"present in user_data.layers (found: "
-                    f"{sorted(d['user_data']['layers'])})."
-                )
+                    f"user_data.domain_from = '{dfrom}', but {why} (user "
+                    f"layers found: {sorted(d['user_data']['layers'])}).")
         else:
             raise ConfigError(
                 "No area of interest: set user_data.domain (a domain.shp) or "

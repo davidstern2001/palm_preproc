@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.2
+
+**Correctness**
+
+- `~` is expanded in every path (`project.root`, `input.user_data.dir`,
+  layer paths, masks, `project.defaults`, ...). pathlib leaves it alone,
+  so `root: ~/palm/DATA` resolved to `<config folder>/~/palm/DATA`, no
+  user layer was found, and the run stopped with "domain_from =
+  'landcover' but that layer is not present in user_data.layers (found:
+  [])".
+- A `project.root` that does not exist is now an error that names it, and
+  a `domain_from` layer that is missing names the file it looked for.
+
 ## 1.4.1
 
 **Correctness**

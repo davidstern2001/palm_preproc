@@ -64,6 +64,32 @@ class TestExplicitNull:
             _load(root, text)
 
 
+class TestPaths:
+    def test_a_tilde_root_is_the_home_folder(self, root, monkeypatch):
+        # `~/palm/DATA` used to resolve to <config dir>/~/palm/DATA, so no
+        # user layer was found and domain_from failed with "found: []"
+        monkeypatch.setenv("HOME", str(root.parent))
+        cfg_dir = root / "config"
+        cfg_dir.mkdir()
+        path = cfg_dir / "p.yaml"
+        path.write_text(f"project:\n    name: proj\n    root: ~/{root.name}/\n"
+                        + USER)
+        cfg = Config(path)
+        assert cfg["project"]["root"] == str(root)
+        assert cfg.domain_source()[1] == "extent"
+
+    def test_a_missing_root_is_named(self, root):
+        path = root / "p.yaml"
+        path.write_text("project:\n    name: proj\n    root: nowhere\n" + USER)
+        with pytest.raises(ConfigError, match="project.root not found"):
+            Config(path)
+
+    def test_a_missing_domain_from_layer_names_the_path(self, root):
+        (root / "proj" / "DATA_user" / "landcover.shp").unlink()
+        with pytest.raises(ConfigError, match=r"DATA_user/landcover\.shp does not exist"):
+            _load(root, USER)
+
+
 class TestSiteDefaults:
     def test_defaults_false_skips_the_site_file(self, root):
         # it used to be read before translation, i.e. never
