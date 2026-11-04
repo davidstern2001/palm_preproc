@@ -12,7 +12,7 @@ input_schema: 'inputs_<case>'
 
 domain:
     name: '<case>'
-    scenario: '_N02'
+    scenario: 'N02'
     parent_domain_schema: '<case>'
     dx: <>
     dy: <>
