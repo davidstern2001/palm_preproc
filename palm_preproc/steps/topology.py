@@ -23,6 +23,7 @@ log and the user picks one; in non-interactive contexts (batch jobs, piped
 input) the recommended configuration is chosen automatically.
 """
 
+import math
 import sys
 
 from ..log import get_logger
@@ -62,13 +63,66 @@ def nested_configurations(parent_spec, child_spec, opt=True, opt_n02=True):
     return out
 
 
-def best_per_node_group(configs, node_cpus, nested=True):
+# Grid points per core are the measure of work. In a nested run parent and
+# child advance together, one time step at a time, so a step takes as long
+# as the domain with MORE points per core; the other one waits. Balancing
+# core COUNTS (the 1:3 .. 1:1 rule above) does not balance that: palmovka
+# was offered parent 432 + child 448 cores with 82 000 vs 156 000 points
+# per core, half the parent's cores idle. `pts` is {domain: nx*ny*nz} for
+# a nested run, or the single domain's count; None keeps the old ranking.
+
+# A layout costing at most this much more node-hours than the cheapest
+# still counts as cheap; among those the fastest is recommended.
+COST_SLACK = 0.05
+
+
+def step_load(c, pts, nested=True):
+    """Grid points per core of the slower domain (the time-step cost)."""
+    if nested:
+        return max(pts["parent"] / c["parent"]["cores"],
+                   pts["child"] / c["child"]["cores"])
+    return pts / c["cores"]
+
+
+def _cores(c, nested):
+    return c["sum"] if nested else c["cores"]
+
+
+def _booked(cores, node_cpus):
+    """What a job is billed: whole nodes, or plain cores without node_cpus."""
+    return math.ceil(cores / node_cpus) if node_cpus else cores
+
+
+def _squareness(c, nested):
+    if nested:
+        return (abs(c["parent"]["npex"] - c["parent"]["npey"])
+                + abs(c["child"]["npex"] - c["child"]["npey"]))
+    return abs(c["npex"] - c["npey"])
+
+
+def best_per_node_group(configs, node_cpus, nested=True, pts=None):
     """Keep only the best-packed configuration for each whole node count:
     the one that books ceil(cores/node_cpus) nodes with the least idle space
     on the last node (highest fractional node count in that group). E.g. from
-    all the 14.xx-node options only 14.95 survives. No-op without node_cpus."""
+    all the 14.xx-node options only 14.95 survives. No-op without node_cpus.
+
+    With `pts`, the fastest layout of each group survives instead: every
+    layout in a group books the same nodes, so the one with the lowest
+    load per core is simply the best use of them."""
     if not node_cpus:
         return configs
+    if pts is not None:
+        best = {}
+        for c in configs:
+            g = _booked(_cores(c, nested), node_cpus)
+            key = (step_load(c, pts, nested), _squareness(c, nested))
+            if g not in best or key < best[g][0]:
+                best[g] = (key, c)
+        out = [v[1] for _, v in sorted(best.items())]
+        if len(out) < len(configs):
+            log.debug(f"[topology] fastest per node count: {len(configs)} "
+                      f"-> {len(out)}")
+        return out
 
     def cores(c):
         return c["sum"] if nested else c["cores"]
@@ -108,11 +162,27 @@ def filter_by_nodes(configs, node_cpus, min_nodes=None, max_nodes=None,
     return kept
 
 
-def dedupe_by_cores(configs, nested=True):
+def dedupe_by_cores(configs, nested=True, pts=None):
     """Keep one configuration per distinct total core count (= per distinct
     node count): the one with the most square per-domain core grids. The
     node count determines the job cost, so listing several layouts that
-    cost the same only pads the selection."""
+    cost the same only pads the selection.
+
+    With `pts`, the best-BALANCED split of each core count is kept (lowest
+    load per core, then squareness): 880 cores as 432 + 448 and as 288 +
+    592 cost the same and are not equally fast."""
+    if pts is not None:
+        best = {}
+        for c in configs:
+            k = _cores(c, nested)
+            key = (step_load(c, pts, nested), _squareness(c, nested))
+            if k not in best or key < best[k][0]:
+                best[k] = (key, c)
+        out = [v[1] for _, v in sorted(best.items())]
+        if len(out) < len(configs):
+            log.debug(f"[topology] {len(configs)} topologies collapsed to "
+                      f"{len(out)} (best balanced per core count)")
+        return out
     def cores(c):
         return c["sum"] if nested else c["cores"]
 
@@ -153,7 +223,20 @@ def _node_waste(cores, node_cpus):
     return 0.0 if frac == 0.0 else 1.0 - frac
 
 
-def recommend_nested(configs, npes_parent, npes_child, node_cpus=None):
+def _recommend_by_load(configs, node_cpus, pts, nested):
+    """Index of the fastest layout among those within COST_SLACK of the
+    cheapest, cost = booked nodes (or cores) x load per core, i.e.
+    node-hours up to a constant."""
+    loads = [step_load(c, pts, nested) for c in configs]
+    costs = [_booked(_cores(c, nested), node_cpus) * w
+             for c, w in zip(configs, loads)]
+    cheap = min(costs) * (1 + COST_SLACK)
+    return min((i for i, cst in enumerate(costs) if cst <= cheap),
+               key=lambda i: (loads[i], _squareness(configs[i], nested)))
+
+
+def recommend_nested(configs, npes_parent, npes_child, node_cpus=None,
+                     pts=None):
     """Index of the recommended nested configuration.
 
     With core-count targets set, closeness to them leads. Without targets and
@@ -161,10 +244,16 @@ def recommend_nested(configs, npes_parent, npes_child, node_cpus=None):
     booked node (a job is billed ceil(cores/node_cpus) whole nodes, so a node
     count just below an integer packs best); ties break toward more cores,
     then squarer core grids. Without node_cpus, the most cores (fastest run).
+
+    With `pts` (grid points per domain) and no targets: the fastest layout
+    among those within COST_SLACK of the cheapest in node-hours, both
+    measured by the slower domain's load per core.
     """
     if not configs:
         return None
     target = (npes_parent or 0) + (npes_child or 0)
+    if pts is not None and not target:
+        return _recommend_by_load(configs, node_cpus, pts, nested=True)
 
     def key(c):
         sq = (abs(c["parent"]["npex"] - c["parent"]["npey"])
@@ -179,9 +268,11 @@ def recommend_nested(configs, npes_parent, npes_child, node_cpus=None):
     return min(range(len(configs)), key=lambda i: key(configs[i]))
 
 
-def recommend_single(configs, npes, node_cpus=None):
+def recommend_single(configs, npes, node_cpus=None, pts=None):
     if not configs:
         return None
+    if pts is not None and not npes:
+        return _recommend_by_load(configs, node_cpus, pts, nested=False)
 
     def key(c):
         sq = abs(c["npex"] - c["npey"])
@@ -202,24 +293,38 @@ def _fmt_single(c):
             f" cells/core {c['cx']}x{c['cy']}")
 
 
-def _log_nested_table(configs, recommended, node_cpus):
+def _log_nested_table(configs, recommended, node_cpus, pts=None):
     log.info("Possible processor topologies "
              "(rules by Hynek Reznicek, procesor_topology_nested.py), "
              "one per node count:")
+    fastest = (min(step_load(c, pts) for c in configs) if pts and configs
+               else None)
+    if pts:
+        log.info("(speed: estimated from the grid points per core of the "
+                 "slower domain; both domains advance step by step together)")
     for i, c in enumerate(configs, 1):
         nodes = f", nodes = {c['sum'] / node_cpus:.2f}" if node_cpus else ""
-        log.info(f"[{i:>3}] parent: {_fmt_single(c['parent'])}")
+        mark = "  <- recommended" if i - 1 == recommended else ""
+        log.info(f"[{i:>3}] parent: {_fmt_single(c['parent'])}{mark}")
         log.info(f"      N02:    {_fmt_single(c['child'])}   "
                  f"sum_cpu = {c['sum']}{nodes}")
+        if pts:
+            wp = pts["parent"] / c["parent"]["cores"]
+            wc = pts["child"] / c["child"]["cores"]
+            log.info(f"      points/core parent {wp/1e3:,.0f}k, N02 "
+                     f"{wc/1e3:,.0f}k -> speed "
+                     f"{fastest / max(wp, wc):.2f} of the fastest")
 
 
-def _log_single_table(configs, recommended, node_cpus):
+def _log_single_table(configs, recommended, node_cpus, pts=None):
     log.info("Possible processor topologies "
              "(rules by Hynek Reznicek, procesor_topology.py), "
              "one per node count:")
     for i, c in enumerate(configs, 1):
         nodes = f", nodes = {c['cores'] / node_cpus:.2f}" if node_cpus else ""
-        log.info(f"[{i:>3}] {_fmt_single(c)}{nodes}")
+        load = f", points/core {pts / c['cores'] / 1e3:,.0f}k" if pts else ""
+        mark = "  <- recommended" if i - 1 == recommended else ""
+        log.info(f"[{i:>3}] {_fmt_single(c)}{nodes}{load}{mark}")
 
 
 def _prompt_index(n, recommended):
@@ -238,7 +343,7 @@ def _prompt_index(n, recommended):
 
 
 def choose_topology(configs, recommended, mode="ask", node_cpus=None,
-                    nested=True, interactive_override=None):
+                    nested=True, interactive_override=None, pts=None):
     """Present configurations and return the chosen index (or None).
 
     mode: "ask"  -> interactive prompt when stdin is a terminal,
@@ -268,5 +373,5 @@ def choose_topology(configs, recommended, mode="ask", node_cpus=None,
             log.debug(f"[topology] {desc}")
         return recommended
     (_log_nested_table if nested else _log_single_table)(
-        configs, recommended, node_cpus)
+        configs, recommended, node_cpus, pts)
     return _prompt_index(len(configs), recommended)

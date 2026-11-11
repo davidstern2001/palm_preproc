@@ -411,6 +411,48 @@ class TestTopologyPins:
         assert (tv["npex_parent"], tv["npex_child"]) == (8, 12)
 
 
+class TestTopologyByLoad:
+    """Palmovka was offered parent 432 + child 448 cores, 82k vs 156k grid
+    points per core: the child set the pace and half the parent's cores
+    waited. With nz known, layouts are ranked by load per core."""
+    P = DomainSpec("parent", "EPSG:32633", 8.0, 0.0, 0.0, 360, 384)
+    C = DomainSpec("child", "EPSG:32633", 2.0, 400.0, 400.0, 960, 1008)
+    PTS = {"parent": 360 * 384 * 256, "child": 960 * 1008 * 72}
+
+    def _resolve(self, nz):
+        cfg = _topo_cfg(node_cpus=80, min_nodes=6, max_nodes=16)
+        _resolve_topology(self.C, self.P, cfg, nested=True, nz=nz)
+        tv = cfg["templates"]["values"]
+        return {"parent": {"cores": tv["npex_parent"] * tv["npey_parent"]},
+                "child": {"cores": tv["npex_child"] * tv["npey_child"]}}
+
+    def test_same_core_count_keeps_the_balanced_split(self):
+        from palm_preproc.steps.topology import dedupe_by_cores
+        def cfg(p, c):
+            return {"parent": {"cores": p, "npex": 1, "npey": p},
+                    "child": {"cores": c, "npex": 1, "npey": c}, "sum": p + c}
+        lopsided, balanced = cfg(432, 448), cfg(288, 592)
+        out = dedupe_by_cores([lopsided, balanced], pts=self.PTS)
+        assert out == [balanced]
+
+    def test_recommended_layout_is_balanced(self):
+        from palm_preproc.steps.topology import step_load
+        c = self._resolve({"parent": 256, "child": 72})
+        wp = self.PTS["parent"] / c["parent"]["cores"]
+        wc = self.PTS["child"] / c["child"]["cores"]
+        assert max(wp, wc) / min(wp, wc) < 1.15
+        assert step_load(c, self.PTS) < self.PTS["child"] / 448   # beats 432+448
+
+    def test_without_nz_the_old_ranking_is_kept(self):
+        from palm_preproc.steps.topology import recommend_nested
+        cs = [{"parent": {"cores": 144, "npex": 12, "npey": 12},
+               "child": {"cores": 336, "npex": 24, "npey": 14}, "sum": 480},
+              {"parent": {"cores": 216, "npex": 18, "npey": 12},
+               "child": {"cores": 504, "npex": 24, "npey": 21}, "sum": 720}]
+        # whole nodes, then more cores: as before
+        assert recommend_nested(cs, None, None, 80) == 1
+
+
 # ------------------------------
 # 6. STALE GENERATED FILES
 # ------------------------------

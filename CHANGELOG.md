@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.6.0
+
+**Processor topology**
+
+- The chooser weighs grid points per core. In a nested run the domain
+  with more points per core sets the pace and the other waits; ranking by
+  core counts alone offered palmovka parent 432 + child 448 cores at
+  82 000 vs 156 000 points per core, half the parent's cores idle.
+  - `nz` is now worked out before the topology.
+  - Per core count the best-balanced split is kept, per node count the
+    fastest layout.
+  - The recommendation is the fastest layout within 5 % of the cheapest in
+    node-hours.
+  - Each row of the table shows the load per core and an estimated speed;
+    the recommended row is marked.
+  - With `nz` unknown the old ranking is used.
+
 ## 1.5.0
 
 **Run files**

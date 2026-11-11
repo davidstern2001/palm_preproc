@@ -160,8 +160,8 @@ cluster:
                                  # '2 d', or hours as a number) - not the
                                  # simulated period
     #node_cpus: null             # cpus per node (palmrun -T): enables the
-                                 # nodes column and a recommendation that
-                                 # wastes the fewest cores on the last node
+                                 # nodes column and lets the chooser count
+                                 # cost in booked nodes (node-hours)
     #nodes: [2, 16]              # [min, max] offered by the topology chooser
     #cores: [null, null]         # [parent, child] TARGET core counts
                                  # steering the recommendation
@@ -236,9 +236,9 @@ report:                          # domain geometry and &nesting_parameters
                                  # recommendation on Enter / in
                                  # non-interactive runs)
                                  # false: take the recommendation silently
-        #list_all: false         # false: only the best-packed option per
-                                 # whole node count (least idle space on
-                                 # the last node); true: list them all
+        #list_all: false         # false: only the fastest option per
+                                 # whole node count (lowest grid points
+                                 # per core); true: list them all
                                  # (needs cluster.node_cpus)
         #optimize_child: false   # let the topology grow the child domain
         #optimize_parent: true   # ... and the parent

@@ -623,13 +623,32 @@ def _pinned_matches(configs, tv, names, nested):
     return kept, pins
 
 
-def _resolve_topology(child, parent, cfg, nested, state=None):
+def _grid_points(child, parent, cfg, nested, nz):
+    """{domain: nx*ny*nz} for a nested run, the single domain's count
+    otherwise; None when any nz is unknown (the chooser then ranks the
+    way it did before it knew about load per core)."""
+    if not nz:
+        return None
+    if nested:
+        if not (nz.get("parent") and nz.get("child")):
+            return None
+        return {"parent": parent.width_pts * parent.height_pts * nz["parent"],
+                "child": child.width_pts * child.height_pts * nz["child"]}
+    name = cfg["templates"].get("single_domain", "parent")
+    spec = parent if name == "parent" else child
+    return spec.width_pts * spec.height_pts * nz[name] if nz.get(name) else None
+
+
+def _resolve_topology(child, parent, cfg, nested, state=None, nz=None):
     """Fill templates.values npex/npey via Hynek Reznicek's topology rules,
     interactively when configured and possible. Pinned values win: all of
     them pinned bypasses the chooser, some of them pinned restricts it to
     the configurations that agree with them (they used to be overwritten
     silently). The resolved topology is persisted to the pipeline state so
-    the report can document the actual choice."""
+    the report can document the actual choice.
+
+    nz ({domain: nz}) lets the chooser weigh grid points per core; without
+    it, the ranking falls back to core counts and node packing alone."""
     tv = cfg["templates"]["values"]
     raw_mode = cfg["templates"].get("topology_select", True)
     mode = "ask" if raw_mode in (True, "ask", "true") else "auto"
@@ -670,15 +689,21 @@ def _resolve_topology(child, parent, cfg, nested, state=None):
 
     configs = filter_by_nodes(configs, node_cpus, tv.get("min_nodes"),
                               tv.get("max_nodes"), nested=nested)
-    configs = dedupe_by_cores(configs, nested=nested)
+    pts = _grid_points(child, parent, cfg, nested, nz)
+    if pts is None:
+        log.debug("[topology] nz unknown - ranking by core counts only")
+    configs = dedupe_by_cores(configs, nested=nested, pts=pts)
     if not cfg["templates"].get("list_all_topologies", False):
-        configs = best_per_node_group(configs, node_cpus, nested=nested)
+        configs = best_per_node_group(configs, node_cpus, nested=nested,
+                                      pts=pts)
     if nested:
         rec = recommend_nested(configs, tv.get("npes_parent"),
-                               tv.get("npes_child"), node_cpus)
+                               tv.get("npes_child"), node_cpus, pts=pts)
     else:
-        rec = recommend_single(configs, tv.get(f"npes_{name}"), node_cpus)
-    idx = choose_topology(configs, rec, mode, node_cpus, nested=nested)
+        rec = recommend_single(configs, tv.get(f"npes_{name}"), node_cpus,
+                               pts=pts)
+    idx = choose_topology(configs, rec, mode, node_cpus, nested=nested,
+                          pts=pts)
     if idx is None:
         return
     chosen = configs[idx]
@@ -687,10 +712,15 @@ def _resolve_topology(child, parent, cfg, nested, state=None):
                                                 chosen["parent"]["npey"])
         tv["npex_child"], tv["npey_child"] = (chosen["child"]["npex"],
                                               chosen["child"]["npey"])
+        load = (f"; points/core parent "
+                f"{pts['parent'] / chosen['parent']['cores'] / 1e3:,.0f}k, "
+                f"N02 {pts['child'] / chosen['child']['cores'] / 1e3:,.0f}k"
+                if pts else "")
         log.info(f"[topology] parent npex={tv['npex_parent']} "
                  f"npey={tv['npey_parent']} ({chosen['parent']['cores']}), "
                  f"N02 npex={tv['npex_child']} npey={tv['npey_child']} "
-                 f"({chosen['child']['cores']}), sum_cpu={chosen['sum']}")
+                 f"({chosen['child']['cores']}), sum_cpu={chosen['sum']}"
+                 f"{load}")
     else:
         tv[f"npex_{name}"], tv[f"npey_{name}"] = chosen["npex"], chosen["npey"]
         log.info(f"[topology] {name} npex={chosen['npex']} "
@@ -954,7 +984,17 @@ def write_templates(child, parent, cfg, state=None):
     if not todo:
         return
 
-    _resolve_topology(child, parent, cfg, nested, state)
+    # nz first: the topology choice weighs grid points per core, and nz
+    # does not depend on the topology. Stored in templates.values so
+    # build_context below uses the same value without recomputing it.
+    tv = tcfg["values"]
+    nz = {}
+    for n, s in specs.items():
+        v = tv.get(f"nz_{n}") or tv.get("nz") or _auto_nz(cfg, s)
+        if v:
+            tv[f"nz_{n}"] = v
+        nz[n] = v
+    _resolve_topology(child, parent, cfg, nested, state, nz=nz)
 
     def put(name, text):
         if name in todo:
