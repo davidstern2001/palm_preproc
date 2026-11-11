@@ -369,7 +369,26 @@ def _seasonal_values(cfg, origin_time):
             log.warning(f"[templates] seasonal: {what} needs 12 monthly "
                         f"values, got {got} - not applied.")
             return None
-        return float(table[month_idx])
+        entry = table[month_idx]
+        if isinstance(entry, (list, tuple)):  # a row of per-layer values
+            return [float(v) for v in entry]
+        return float(entry)
+
+    def soil_layers(table, what):
+        """The 8 soil-layer values for this month: a monthly scalar is
+        used for every layer, a monthly row of 8 per layer. Both forms
+        may also sit under {min/ave/max: ...}. The row forms used to
+        crash: month_value called float() on the whole row."""
+        v = month_value(table, what)
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            return [v] * 8
+        if len(v) != 8:
+            log.warning(f"[templates] seasonal: {what} rows need 8 layers, "
+                        f"got {len(v)} - not applied.")
+            return None
+        return v
 
     out = {"water": {}, "soil": None, "deep_soil": None,
            "soil_moisture": None, "p3d": {}}
@@ -395,20 +414,7 @@ def _seasonal_values(cfg, origin_time):
 
     soil = _seasonal_key(scfg, "soil_temperature", "soil_temperature_k")
     if soil is not None:
-        c = month_value(soil, "soil_temperature")
-        layers = None
-        if c is not None:                     # 12 scalars: uniform layers
-            layers = [c] * 8
-        elif (isinstance(soil, (list, tuple)) and len(soil) == 12
-              and all(isinstance(v, (list, tuple)) for v in soil)):
-            layer_row = soil[month_idx]       # 12 rows of 8 layer values
-            if len(layer_row) == 8:
-                layers = [float(v) for v in layer_row]
-            else:
-                log.warning(f"[templates] seasonal: soil_temperature rows "
-                            f"need 8 layers, got {len(layer_row)}.")
-        if layers:
-            out["soil"] = list(layers)
+        out["soil"] = soil_layers(soil, "soil_temperature")
 
     deep = _seasonal_key(scfg, "deep_soil_temperature",
                          "deep_soil_temperature_k")
@@ -426,20 +432,7 @@ def _seasonal_values(cfg, origin_time):
     # or 12 rows of 8 per-layer values.
     moist = scfg.get("soil_moisture")
     if moist is not None:
-        c = month_value(moist, "soil_moisture")
-        layers = None
-        if c is not None:
-            layers = [c] * 8
-        elif (isinstance(moist, (list, tuple)) and len(moist) == 12
-              and all(isinstance(v, (list, tuple)) for v in moist)):
-            layer_row = moist[month_idx]
-            if len(layer_row) == 8:
-                layers = [float(v) for v in layer_row]
-            else:
-                log.warning(f"[templates] seasonal: soil_moisture rows "
-                            f"need 8 layers, got {len(layer_row)}.")
-        if layers:
-            out["soil_moisture"] = layers
+        out["soil_moisture"] = soil_layers(moist, "soil_moisture")
 
     # other scalar p3d values by namelist parameter name, substituted
     # verbatim (K, or the parameter's own unit - deltas like

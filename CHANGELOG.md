@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.4.3
+
+**Correctness**
+
+- The per-layer forms of `soil_temperature` and `soil_moisture` in
+  `seasonal.yaml` - 12 rows of 8 layer values, plain or under
+  `min`/`ave`/`max` - crashed the templates stage with a TypeError (the
+  monthly lookup called `float()` on the whole row). Only 12 plain monthly
+  scalars worked; nobody hit it because the soil tables were empty.
+
 ## 1.4.2
 
 **Correctness**

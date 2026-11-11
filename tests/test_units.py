@@ -460,6 +460,37 @@ class TestStaleSet:
         assert _pgem_points_stale(f, self.P) is None
 
 
+class TestSeasonalSoilTables:
+    """The per-layer forms documented in seasonal.yaml (12 rows of 8 layer
+    values, optionally under min/ave/max) used to crash the templates
+    stage: the monthly lookup called float() on the whole row."""
+
+    ROWS = [[280.0 + m + l / 10 for l in range(8)] for m in range(12)]
+
+    def _soil(self, table, stat="ave"):
+        import palm_preproc.steps.templates as tm
+        orig = tm._load_seasonal
+        tm._load_seasonal = lambda cfg: {"enabled": True, "statistic": stat,
+                                         "soil_temperature": table,
+                                         "soil_moisture": table}
+        try:
+            return tm._seasonal_values({}, "2023-08-23 19:00:00")
+        finally:
+            tm._load_seasonal = orig
+
+    def test_rows_of_layers(self):
+        v = self._soil(self.ROWS)
+        assert v["soil"] == pytest.approx([287.0 + l / 10 for l in range(8)])
+        assert v["soil_moisture"] == v["soil"]
+
+    def test_rows_under_a_statistic(self):
+        table = {"ave": self.ROWS, "max": [[x + 5 for x in r] for r in self.ROWS]}
+        assert self._soil(table, "max")["soil"][0] == pytest.approx(292.0)
+
+    def test_monthly_scalars_fill_every_layer(self):
+        assert self._soil([280.0 + m for m in range(12)])["soil"] == [287.0] * 8
+
+
 class TestParseHours:
     @pytest.mark.parametrize("value,want", [
         (29, 29.0), (29.5, 29.5), ("29", 29.0), ("29 h", 29.0),
