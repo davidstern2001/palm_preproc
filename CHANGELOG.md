@@ -1,5 +1,41 @@
 # Changelog
 
+## 1.5.0
+
+**Run files**
+
+- Spin-up radiation: the `_p3d` files get `radiation_scheme_spinup =
+  'clear-sky'` (new setting `run.spinup_radiation`, default `clear-sky`).
+  The dynamic driver's radiation starts at `origin_time`, so with
+  `radiation_scheme = 'external'` and a 24 h spin-up PALM stopped in
+  `radiation_init` (RAD0040, "does not cover the beginning of the
+  simulation or spinup time"). Needs a PALM build with fix 1019, which
+  makes the setting readable from `&radiation_parameters`; on older builds
+  set `run.spinup_radiation: null` to leave the line out.
+- The p3d templates use the current output names (`theta2_res`,
+  `wq_sgs`, `tsurf_xy_av`, `rad_net_surf_xy_av`, ...). PALM renamed the 29
+  deprecated entries at every start and logged a warning for each. The
+  output files are unchanged: PALM already wrote the new names.
+
+**Defaults**
+
+- `project.output_dir` defaults to `'{name}'`, the project's own folder
+  under `project.root`, as `template.yaml` always said. It was `.`, the
+  root itself, where every project without an `output_dir` wrote over the
+  others. Configs that relied on the old default now write to
+  `<root>/<project.name>`.
+- `run.wrf_date` defaults to the date of `origin_time`, as documented.
+- `project.overwrite` no longer empties `import_process.log` (or any other
+  `create_empty` aux file); the database import fills it. Copied aux files
+  are still refreshed.
+
+**Smaller**
+
+- A `cluster.wrf_dir` that ends in a date folder is reported: pmeteo
+  appends `run.wrf_date` as well, giving `<wrf_dir>/<wrf_date>/...`.
+- The submit script no longer reports "1 placeholder(s) to fill" for a
+  `<id>` in one of its comments.
+
 ## 1.4.3
 
 **Correctness**

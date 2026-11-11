@@ -119,10 +119,10 @@
          data_output =
                        'u_av','v_av','w_av','ta_av', 'theta_av', 'p_av', 'q_av', 'rh_av',
                        't_soil_av', 'm_soil_av',
-                       'tsurf*_xy_av',
-                       'ta_2m*_xy_av', 'theta_2m*_xy_av', 'wspeed_10m*_xy_av', 'qv_2m*_xy',
-                       'rad_net*_xy_av', 'rad_lw_in*_xy_av', 'rad_lw_out*_xy_av', 'rad_sw_in*_xy_av', 'rad_sw_out*_xy_av',
-                       'bio_mrt*_xy_av','bio_pet*_xy_av','bio_utci*_xy_av','bio_perct*_xy_av',
+                       'tsurf_xy_av',
+                       'ta_2m_xy_av', 'theta_2m_xy_av', 'wspeed_10m_xy_av', 'qv_2m_xy',
+                       'rad_net_surf_xy_av', 'rad_lw_in_surf_xy_av', 'rad_lw_out_surf_xy_av', 'rad_sw_in_surf_xy_av', 'rad_sw_out_surf_xy_av',
+                       'bio_mrt_xy_av','bio_pet_xy_av','bio_utci_xy_av','bio_perct_xy_av',
 !
 !-- timeseries output
 !--------------------------------------
@@ -143,15 +143,16 @@
                      '#u','#v','w','#theta','hyp','p',
                      '#t_soil', '#m_soil',
                      'rad_lw_in', 'rad_lw_out','rad_sw_in','rad_sw_out',
-                     'theta*2','wtheta','wq','#q','q*2','w"q"', 'w*q*','#l','wqv','w*theta*','w"theta"',
-                     'u*2','v*2','w*2',
-                     'e', 'e*','wu','wv','w*u*', 'w*v*','w"u"', 'w"v"',
+                     'theta2_res','wtheta','wq','#q','q2_res','wq_sgs', 'wq_res','#l','wqv','wtheta_res','wtheta_sgs',
+                     'u2_res','v2_res','w2_res',
+                     'e_sgs', 'e_res','wu','wv','wu_res', 'wv_res','wu_sgs', 'wv_sgs',
 
  /
 
 !------------------------------------------------------------------------------
  &radiation_parameters
          radiation_scheme         = 'external',
+         radiation_scheme_spinup  = '<radiation_scheme_spinup>',   ! needs PALM with fix 1019
          plant_lw_interact        = .T.,
          constant_albedo          = .T.,
          albedo_type              = 0,

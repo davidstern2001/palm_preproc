@@ -90,6 +90,20 @@ class TestPaths:
             _load(root, USER)
 
 
+class TestNewDefaults:
+    def test_output_dir_defaults_to_the_project_folder(self, root):
+        # it was ".", the root itself, shared by every project
+        assert _load(root, USER).output_dir == root / "proj"
+
+    def test_spinup_radiation_defaults_to_clear_sky(self, root):
+        tv = _load(root, USER)["templates"]["values"]
+        assert tv["radiation_scheme_spinup"] == "clear-sky"
+
+    def test_spinup_radiation_null_switches_it_off(self, root):
+        cfg = _load(root, USER + "run:\n    spinup_radiation: null\n")
+        assert cfg["templates"]["values"]["radiation_scheme_spinup"] is None
+
+
 class TestSiteDefaults:
     def test_defaults_false_skips_the_site_file(self, root):
         # it used to be read before translation, i.e. never

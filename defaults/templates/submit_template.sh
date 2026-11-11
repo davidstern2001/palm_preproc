@@ -10,7 +10,7 @@
 #   -T  MPI processes per node (must match the cluster's cores per node)
 #   -t  WALL-CLOCK limit in seconds - this is the batch time limit, NOT the
 #       simulated period (that is end_time in the _p3d file)
-#   -r  run identifier: the JOBS/<id> directory palmrun works in
+#   -r  run identifier: names the JOBS/ subdirectory palmrun works in
 #   -c  palmrun configuration file (.ifx)
 #   -a  activation string: which input/output files palmrun stages
 #         d3#      main run (initial)

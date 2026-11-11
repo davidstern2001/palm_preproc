@@ -31,7 +31,10 @@ DEFAULTS = {
         # is the directory of the YAML file itself; set this when configs are
         # stored centrally (e.g. in config/) away from the project data.
         "root": None,
-        "output_dir": ".",
+        # {name} = project.name: each project writes into its own folder
+        # under root. It used to default to "." - the root itself, where
+        # every project without an output_dir wrote over the others.
+        "output_dir": "{name}",
         "state_file": None,          # default: <output_dir>/palm_preproc_state.json
         # true: regenerate ALL outputs, ignoring resume state and replacing
         # existing generated templates and aux files (import_process.log
@@ -153,6 +156,11 @@ DEFAULTS = {
             "length": None,          # simulation length [h]: end_time (p3d)
                                      # and pmeteo length (was simulation_hours)
             "wrf_date": None,        # WRF path date, e.g. "2023-08-23"
+            # radiation during the spin-up (PALM's radiation_scheme_spinup):
+            # the dynamic driver's radiation starts at origin_time, so the
+            # spin-up needs its own scheme; null leaves it out (PALM builds
+            # before fix 1019 reject the setting).
+            "radiation_scheme_spinup": "clear-sky",
             "npes_parent": None,     # TARGET core counts: steer the topology
             "npes_child": None,      #   recommendation (null -> most cores)
             "node_cpus": None,       # cpus per node (-T): enables the nodes
@@ -349,7 +357,9 @@ class Config:
         else:
             self.base_dir = self.yaml_path.parent
         d["project"]["root"] = str(self.base_dir)
-        d["project"]["output_dir"] = self._resolve(d["project"]["output_dir"])
+        out = str(d["project"]["output_dir"]).replace(
+            "{name}", str(d["project"]["name"]))
+        d["project"]["output_dir"] = self._resolve(out)
         # state_file: null -> default path; false -> disabled (no state file);
         # anything else -> an explicit path. A bare `true` is meaningless and
         # is treated as null, with a warning: YAML turns unquoted yes/no/on/

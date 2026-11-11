@@ -506,6 +506,28 @@ def _parse_hours(value):
     return {"h": n, "d": n * 24.0, "m": n / 60.0, "s": n / 3600.0}[unit]
 
 
+def _wrf_date(tv):
+    """templates.values.wrf_date, or the date of origin_time when unset.
+
+    pmeteo reads <wrf_dir>/<wrf_date>/wrfout_d03*, so wrf_dir is the BASE
+    folder and the date folder comes from here. A wrf_dir that itself ends
+    in a date folder nests two dates, which is easy to miss in the file."""
+    date = tv.get("wrf_date")
+    if not date and tv.get("origin_time"):
+        m = re.match(r"\s*(\d{4}-\d{2}-\d{2})", str(tv["origin_time"]))
+        date = m.group(1) if m else None
+    wrf_dir = str(tv.get("wrf_dir") or "").rstrip("/")
+    last = wrf_dir.rsplit("/", 1)[-1]
+    if (re.fullmatch(r"\d{4}-?\d{2}-?\d{2}", last)
+            and not _WARNED.get("wrf_dir_date")):
+        _WARNED["wrf_dir_date"] = True
+        log.warning(f"[templates] templates.values.wrf_dir ends in a date "
+                    f"folder ({last}); pmeteo appends templates.values."
+                    f"wrf_date too, reading {wrf_dir}/{date}/wrfout_d03*. "
+                    f"Set wrf_dir to the base folder unless that is meant.")
+    return date
+
+
 def build_context(spec, cfg, other=None):
     """Assemble the substitution context for one domain.
 
@@ -539,9 +561,11 @@ def build_context(spec, cfg, other=None):
         "hours": _parse_hours(tv.get("length")
                               if tv.get("length") is not None
                               else tv.get("simulation_hours")),
-        "wrf_date": tv.get("wrf_date"),
+        "wrf_date": _wrf_date(tv),
         "hpc_user": tv.get("hpc_user"),
         "wrf_dir": tv.get("wrf_dir"),
+        "radiation_scheme_spinup": tv.get("radiation_scheme_spinup",
+                                          "clear-sky"),
         "seasonal": _seasonal_values(cfg, tv.get("origin_time")),
     }
     return ctx
@@ -746,6 +770,18 @@ def fill_p3d(text, ctx, child_ctx=None):
     if ctx["hours"]:
         t = _sub_token(t, "<time_in_seconds>", int(float(ctx["hours"]) * 3600))
         t = _sub_token(t, "<time>", _fmt_g(ctx["hours"]))
+
+    # radiation during the wall/soil spin-up. The dynamic driver's radiation
+    # starts at origin_time, so with external radiation and a spin-up PALM
+    # needs another scheme before it (RAD0039/40: "does not cover the
+    # beginning of the simulation or spinup time"). null drops the line,
+    # for PALM builds without fix 1019, which reject it in the namelist.
+    spin_rad = ctx.get("radiation_scheme_spinup")
+    if spin_rad:
+        t = _sub_token(t, "<radiation_scheme_spinup>", spin_rad)
+    else:
+        t = re.sub(r"(?m)^[ \t]*radiation_scheme_spinup\s*=\s*'<radiation_scheme_spinup>'.*\n",
+                   "", t)
 
     # processor topology (namelist lines and the comment line)
     if ctx["npex"] and ctx["npey"]:
@@ -983,7 +1019,8 @@ def write_templates(child, parent, cfg, state=None):
     missing = [k for k in ("origin_time", "length", "wrf_date",
                            "hpc_user", "wrf_dir")
                if not (tcfg["values"].get(k)
-                       or (k == "length" and tcfg["values"].get("simulation_hours")))]
+                       or (k == "length" and tcfg["values"].get("simulation_hours"))
+                       or (k == "wrf_date" and _wrf_date(tcfg["values"])))]
     # nz_parent/nz_child are not required: they auto-calculate from the final
     # buildings raster (child) or a fixed target height (parent) unless set
     # explicitly. Only warn about nz when it was neither set nor successfully

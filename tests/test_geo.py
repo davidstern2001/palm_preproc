@@ -49,6 +49,29 @@ class TestWallMatching:
             True, True, False]
 
 
+class TestAuxFiles:
+    def test_overwrite_keeps_a_filled_import_log(self, tmp_path):
+        # project.overwrite used to empty import_process.log every run
+        from palm_preproc.config import Config
+        from palm_preproc.pipeline import _place_aux_files
+        (tmp_path / "proj" / "DATA_user").mkdir(parents=True)
+        (tmp_path / "proj" / "DATA_user" / "domain.shp").touch()
+        (tmp_path / "DATA_raw").mkdir()
+        (tmp_path / "DATA_raw" / "surface_params.csv").write_text("new")
+        cfg_path = tmp_path / "p.yaml"
+        cfg_path.write_text(f"project: {{name: proj, root: {tmp_path}, "
+                            f"overwrite: true}}\ninput: {{user_data: "
+                            f"{{dir: ./proj/DATA_user, domain: domain.shp}}}}\n")
+        cfg = Config(cfg_path)
+        ddir = cfg.data_dir("child")
+        ddir.mkdir(parents=True)
+        (ddir / "import_process.log").write_text("filled by the import")
+        (ddir / "surface_params.csv").write_text("old")
+        _place_aux_files(cfg)
+        assert (ddir / "import_process.log").read_text() == "filled by the import"
+        assert (ddir / "surface_params.csv").read_text() == "new"
+
+
 def _raster(path, arr, x0, y0, res):
     with rasterio.open(path, "w", driver="GTiff", width=arr.shape[1],
                        height=arr.shape[0], count=1, dtype="float32",

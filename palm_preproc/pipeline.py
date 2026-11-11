@@ -216,8 +216,11 @@ def _clip_output_path(cfg, dom, layer):
 
 def _place_aux_files(cfg):
     """Copy/create auxiliary files (surface_params.csv, import_process.log)
-    into DATA_child and DATA_parent. Never overwrites existing files, so a
-    log filled by the database import or an edited CSV survives reruns."""
+    into DATA_child and DATA_parent. Existing files are kept, so a log
+    filled by the database import or an edited CSV survives reruns.
+    project.overwrite refreshes copied files, but never empties a
+    create_empty file: that used to wipe import_process.log on every
+    overwrite run."""
     progress("Placing auxiliary files into the data directories")
     aux = cfg["raw_data"].get("aux_files", {}) or {}
     for dom in DOMAIN_NAMES:
@@ -225,7 +228,8 @@ def _place_aux_files(cfg):
         ddir.mkdir(parents=True, exist_ok=True)
         for fname, mode in aux.items():
             dst = ddir / fname
-            if dst.exists() and not cfg["project"].get("overwrite"):
+            if dst.exists() and (mode in ("touch", "create_empty")
+                                 or not cfg["project"].get("overwrite")):
                 log.info(f"[aux] {dom}/{fname}: kept (exists)")
                 continue
             if mode == "copy":

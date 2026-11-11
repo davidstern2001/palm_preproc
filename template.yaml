@@ -30,8 +30,9 @@ project:
     root: '/storage/data/palm'   # base for every path below
     #output_dir: '{name}'        # domain_*.shp + DATA_child/ + DATA_parent/
     #overwrite: false            # true: regenerate ALL outputs - resume
-                                 # state ignored, templates and aux files
-                                 # replaced (import_process.log included)
+                                 # state ignored, templates and copied aux
+                                 # files replaced (import_process.log is
+                                 # kept: the database import fills it)
     #defaults: 'defaults/default.yaml'   # site-wide values applied first;
                                  # false = none. Edit that file to change
                                  # the baseline for every new project.
@@ -89,8 +90,8 @@ input:
             #buildings: false
 
     # Files placed into DATA_child and DATA_parent, never overwritten on
-    # reruns unless project.overwrite. copy: take from raw_data.dir.
-    # create_empty: create an empty file.
+    # reruns. copy: take from raw_data.dir (refreshed with
+    # project.overwrite). create_empty: create an empty file, once.
     #aux_files:
         #surface_params.csv: copy
         #import_process.log: create_empty
@@ -131,7 +132,17 @@ run:
     length: '29 h'               # hours as a number (29) or a unit string
                                  # ('29 h', '1 d'); fills end_time (p3d)
                                  # and length (pmeteo)
-    #wrf_date: null              # WRF path date; null = date of origin_time
+    #wrf_date: null              # WRF date folder; null = date of
+                                 # origin_time. pmeteo reads
+                                 # <cluster.wrf_dir>/<wrf_date>/wrfout_d03*
+    #spinup_radiation: clear-sky # radiation during the 24 h wall/soil
+                                 # spin-up (PALM radiation_scheme_spinup):
+                                 # the dynamic driver's radiation starts at
+                                 # origin_time, so the spin-up needs its own
+                                 # scheme. null leaves the line out - needed
+                                 # for PALM builds without fix 1019 (they
+                                 # reject it); then the driver's radiation
+                                 # must start 24 h before origin_time.
 
 
 # ---------------------------------------------------------------------
@@ -141,7 +152,9 @@ run:
 # Fills the palmrun submit script and the pgem / pmeteo placeholders.
 cluster:
     user: 'stern'                # cluster username (pgem pg_user/pg_owner)
-    #wrf_dir: null               # base dir of WRF output, e.g. '/home/me/wrf'
+    #wrf_dir: null               # BASE dir of WRF output, without the
+                                 # date folder (run.wrf_date adds it),
+                                 # e.g. '/home/me/wrf'
     #queue: null                 # palmrun -q, e.g. qprod
     #walltime: null              # palmrun -t: WALL-CLOCK limit ('48 h',
                                  # '2 d', or hours as a number) - not the

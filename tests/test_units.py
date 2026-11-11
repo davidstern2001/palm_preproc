@@ -491,6 +491,68 @@ class TestSeasonalSoilTables:
         assert self._soil([280.0 + m for m in range(12)])["soil"] == [287.0] * 8
 
 
+class TestTemplateContent:
+    TEMPLATES = sorted((Path(__file__).resolve().parent.parent / "defaults"
+                        / "templates").glob("template*p3d*"))
+    OLD = {"theta*2", "q*2", 'w"q"', "w*q*", "w*theta*", 'w"theta"', "u*2",
+           "v*2", "w*2", "e", "e*", "w*u*", "w*v*", 'w"u"', 'w"v"',
+           "tsurf*_xy_av", "qv_2m*_xy", "rad_net*_xy_av", "bio_utci*_xy_av"}
+
+    def test_no_deprecated_output_names(self):
+        # PALM renamed ~30 of them at every start (PAC0373-0375)
+        import re
+        assert len(self.TEMPLATES) == 6
+        for f in self.TEMPLATES:
+            code = "\n".join(l.split("!", 1)[0] for l in f.read_text().splitlines())
+            assert not set(re.findall(r"'([^']*)'", code)) & self.OLD, f.name
+
+    def _ctx(self, value):
+        spec = _spec("parent", 8.0, 0.0, 0.0, 360, 384)
+        return {"case": "c", "spec": spec, "other": None, "nz": 256,
+                "npex": None, "npey": None, "origin_time": None,
+                "hours": None, "seasonal": {},
+                "radiation_scheme_spinup": value}
+
+    def test_spinup_radiation_is_written(self):
+        for f in self.TEMPLATES:
+            out = fill_p3d(f.read_text(), self._ctx("clear-sky"))
+            assert "radiation_scheme_spinup  = 'clear-sky'," in out, f.name
+
+    def test_spinup_radiation_null_drops_the_line(self):
+        # PALM builds without fix 1019 reject the setting in the namelist
+        for f in self.TEMPLATES:
+            out = fill_p3d(f.read_text(), self._ctx(None))
+            assert "radiation_scheme_spinup" not in out, f.name
+
+    def test_a_filled_submit_script_has_no_placeholder_left(self):
+        # "<id>" in a comment was reported as "1 placeholder(s) to fill"
+        from palm_preproc.steps.templates import fill_submit
+        sub = self.TEMPLATES[0].parent / "submit_template.sh"
+        cfg = {"templates": {"values": {
+            "node_cpus": 80, "walltime": "48 h", "queue": "qprod",
+            "palmrun_config": "default.ifx",
+            "palmrun_activation": "d3# restart"}}}
+        out = fill_submit(sub.read_text(), cfg, "palmovka", 848)
+        assert _PLACEHOLDER_RE.findall(out) == []
+
+
+class TestWrfDate:
+    def test_defaults_to_the_date_of_origin_time(self):
+        from palm_preproc.steps.templates import _wrf_date
+        assert _wrf_date({"origin_time": "2023-08-23 19:00:00"}) == "2023-08-23"
+        assert _wrf_date({"origin_time": "2023-08-23 19:00:00",
+                          "wrf_date": "2023-08-22"}) == "2023-08-22"
+
+    def test_a_date_folder_in_wrf_dir_is_reported(self):
+        import palm_preproc.steps.templates as tm
+        tm._WARNED.pop("wrf_dir_date", None)
+        tm._wrf_date({"wrf_dir": "/wrf/2023-08-24", "wrf_date": "2023-08-23"})
+        assert tm._WARNED.get("wrf_dir_date")
+        tm._WARNED.pop("wrf_dir_date", None)
+        tm._wrf_date({"wrf_dir": "/wrf", "wrf_date": "2023-08-23"})
+        assert not tm._WARNED.get("wrf_dir_date")
+
+
 class TestParseHours:
     @pytest.mark.parametrize("value,want", [
         (29, 29.0), (29.5, 29.5), ("29", 29.0), ("29 h", 29.0),

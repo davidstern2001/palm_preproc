@@ -164,7 +164,7 @@ Starting a new project therefore only means: make `<project>/DATA_user/`, put
 your layers in it, copy `template.yaml` to `config/<project>.yaml`, point
 `project.root` at the tree above, and run.
 
-**Outputs.** Everything is written under `project.output_dir` (relative to `project.root`). For a case named `<case>` (defaults to `project.name`):
+**Outputs.** Everything is written under `project.output_dir` (relative to `project.root`; default `'{name}'`, i.e. `<root>/<project.name>`). For a case named `<case>` (defaults to `project.name`):
 
 | File(s) | Stage | Purpose |
 |---------|-------|---------|
@@ -273,7 +273,7 @@ Runs for both domains by default; disable with `boundary_cleanup.enabled: false`
 
 This stage fills the run-configuration skeletons in `defaults/templates/` for the case.
 
-**Values you must supply** — `origin_time` (UTC), `length` (simulation hours), and `wrf_date` — come from `run:`; if unset, the `<>` placeholders stay and a warning names them.
+**Values you must supply** — `origin_time` (UTC) and `length` (simulation hours) — come from `run:`; if unset, the `<>` placeholders stay and a warning names them. `run.wrf_date` defaults to the date of `origin_time`. palm_meteo reads `<cluster.wrf_dir>/<run.wrf_date>/wrfout_d03*`, so `wrf_dir` is the base folder without the date; one that ends in a date folder is reported.
 
 **`nz` is calculated for you** unless you set `nz_parent`/`nz_child` explicitly:
 
