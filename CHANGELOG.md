@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.1
+
+**Seasonal tables**
+
+- `defaults/templates/seasonal.yaml` carries a Prague climatology for
+  1995-2024 from the Open-Meteo historical weather API (ERA5 / ERA5-Land,
+  grid cell 50.088 N 14.476 E, central Prague), per month as `min` /
+  `ave` / `max` of the 30 yearly monthly means:
+  - `soil_temperature` and `soil_moisture` for the 8 PALM soil layers;
+  - `deep_soil_temperature` below the soil column (2.93 m), from a damped
+    annual heat wave fitted to the four layers;
+  - `spinup_pt_mean` and `spinup_pt_amplitude` from the 2 m air
+    temperature.
+  The templates used to keep fixed winter values (279 K soil, 281.5 K
+  deep soil) and a 299 K / 8 K spin-up all year. Water body temperatures
+  are unchanged: Open-Meteo has no inland water temperature. Data by
+  Open-Meteo.com (CC BY 4.0), based on ERA5 (Copernicus C3S).
+
 ## 1.6.0
 
 **Processor topology**

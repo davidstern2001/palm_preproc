@@ -595,6 +595,32 @@ class TestWrfDate:
         assert not tm._WARNED.get("wrf_dir_date")
 
 
+class TestShippedSeasonalTables:
+    """defaults/templates/seasonal.yaml carries a Prague climatology
+    (Open-Meteo / ERA5, 1995-2024); every month must resolve for every
+    statistic."""
+
+    def _values(self, month, stat):
+        import palm_preproc.steps.templates as tm
+        cfg = {"templates": {"dir": None}, "seasonal": {"statistic": stat}}
+        return tm._seasonal_values(cfg, f"2023-{month:02d}-15 12:00:00")
+
+    @pytest.mark.parametrize("stat", ["min", "ave", "max"])
+    def test_every_month_resolves(self, stat):
+        for month in range(1, 13):
+            v = self._values(month, stat)
+            assert len(v["soil"]) == 8 and len(v["soil_moisture"]) == 8
+            assert all(250 < x < 320 for x in v["soil"])
+            assert all(0 < x < 0.6 for x in v["soil_moisture"])
+            assert 260 < v["deep_soil"] < 300
+            assert set(v["p3d"]) == {"spinup_pt_mean", "spinup_pt_amplitude"}
+
+    def test_statistics_are_ordered(self):
+        lo, mid, hi = (self._values(8, s) for s in ("min", "ave", "max"))
+        assert lo["soil"][0] <= mid["soil"][0] <= hi["soil"][0]
+        assert lo["p3d"]["spinup_pt_mean"] < hi["p3d"]["spinup_pt_mean"]
+
+
 class TestParseHours:
     @pytest.mark.parametrize("value,want", [
         (29, 29.0), (29.5, 29.5), ("29", 29.0), ("29 h", 29.0),
