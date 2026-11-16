@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.3
+
+**Seasonal tables**
+
+- Water temperatures of lakes (1) and ponds (4) come from the ERA5-Land
+  lake mixed-layer temperature for central Prague, monthly `min` / `ave`
+  / `max` over 1995-2024 (Copernicus Climate Data Store,
+  doi:10.24381/cds.68d2bb30); fountains (5) reuse the pond table. They
+  were 298.45 K / 299.55 K all year: an average January is now 274.3 K,
+  an average August 292.7 K. A modelled generic lake, not a measured
+  pond. The river keeps its measured Vltava values; the open sea (3) has
+  no table and keeps the pgem template's value. The "placeholder tables"
+  warning is gone.
+
 ## 1.6.2
 
 **Seasonal tables**

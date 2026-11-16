@@ -620,6 +620,14 @@ class TestShippedSeasonalTables:
             # heated to 21 C at least, adaptive comfort above that
             assert 294.1 < v["p3d"]["wall_inner_temperature"] < 303
 
+    def test_water_tables(self):
+        # lakes/ponds/fountains from ERA5-Land, the river measured; the
+        # open sea has no table, so the pgem template's value stays
+        winter, summer = self._values(1, "ave")["water"], self._values(8, "ave")["water"]
+        assert set(summer) == {1, 2, 4, 5}
+        for i in (1, 4, 5):
+            assert 273.15 <= winter[i] < 280 < 288 < summer[i] < 300
+
     def test_statistics_are_ordered(self):
         lo, mid, hi = (self._values(8, s) for s in ("min", "ave", "max"))
         assert lo["soil"][0] <= mid["soil"][0] <= hi["soil"][0]

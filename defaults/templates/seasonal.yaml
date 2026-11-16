@@ -24,30 +24,46 @@ statistic: ave                      # min | ave | max
 # pgem water_pars_temp, per water landcover type id [K] - the key name
 # matches PALM-GeM's own water_pars_temp; here each type holds monthly
 # tables instead of one constant.
-# River (2) uses measured Vltava monthly statistics. The other types are
-# PLACEHOLDERS: constant year-round at the values the template used to
-# hardcode (so their behaviour is unchanged) - replace with measured
-# monthly data when available.
+# River (2): measured Vltava monthly statistics.
+# Lakes (1) and ponds (4): the lake mixed-layer temperature of the
+#   ERA5-Land reanalysis (monthly means 1995-2024, grid cell 50.1 N
+#   14.5 E, central Prague; the cells around it differ by under 1 K),
+#   min / ave / max = lowest / mean / highest of the 30 years' monthly
+#   means, not below freezing. It is a MODELLED generic lake several
+#   metres deep, not a measured Prague pond: a shallow pond runs warmer
+#   on summer afternoons. For comparison, its August mean (19.5 C) sits
+#   next to the measured Vltava (19 C); in winter the model lake freezes
+#   (about 1 C) where the river stays near 6 C.
+#   Source: Munoz Sabater, J. (2019): ERA5-Land monthly averaged data
+#   from 1950 to present, Copernicus Climate Change Service (C3S)
+#   Climate Data Store, doi:10.24381/cds.68d2bb30. Contains modified
+#   Copernicus Climate Change Service information 2026.
+# Fountains (5): no data source; the pond table is reused as a proxy
+#   (shallow recirculated water follows the same seasons).
+# Open sea (3): no table - not present around Prague; the pgem template's
+#   own value stays.
 # --------------------------------------------------------------
-# Water type ids listed here still carry placeholder (constant year-round)
+# Water type ids listed here carry placeholder (constant year-round)
 # tables; the templates stage logs a TODO warning whenever one is applied.
-# After entering measured monthly data for a type, remove its id from this
-# list to silence the warning.
-placeholder_water_types: [1, 3, 4, 5]
+placeholder_water_types: []
 
 water_pars_temp:
-  1:                                # Shore, lakes (placeholder: template's 298.45 K year-round)
-    ave: [298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45]
+  1:                                # Shore, lakes - ERA5-Land lake mixed layer
+    min: [273.15, 273.15, 273.15, 275.31, 281.91, 288.62, 289.50, 290.34, 284.89, 282.12, 278.25, 273.84]
+    ave: [274.33, 274.15, 275.39, 278.72, 285.39, 290.89, 292.54, 292.68, 288.68, 284.18, 280.23, 276.29]
+    max: [277.06, 276.15, 278.20, 281.73, 288.27, 293.36, 295.44, 294.90, 291.39, 286.10, 281.93, 278.80]
   2:                                # River - Vltava (measured; 1 C = 274.15 K)
     min: [274.15, 275.15, 276.15, 278.15, 281.15, 287.15, 290.15, 288.15, 284.15, 281.15, 276.15, 275.15]
     ave: [279.15, 279.15, 280.15, 283.15, 286.15, 291.15, 293.15, 292.15, 291.15, 286.15, 281.15, 278.15]
     max: [282.15, 282.15, 284.15, 289.15, 294.15, 296.15, 297.15, 296.15, 292.15, 289.15, 289.15, 281.15]
-  3:                                # Open sea (placeholder: template's 300 K year-round)
-    ave: [300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300, 300]
-  4:                                # Pond (placeholder: template's 298.45 K year-round)
-    ave: [298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45, 298.45]
-  5:                                # Fountain (placeholder: template's 299.55 K year-round)
-    ave: [299.55, 299.55, 299.55, 299.55, 299.55, 299.55, 299.55, 299.55, 299.55, 299.55, 299.55, 299.55]
+  4:                                # Pond - ERA5-Land lake mixed layer
+    min: [273.15, 273.15, 273.15, 275.31, 281.91, 288.62, 289.50, 290.34, 284.89, 282.12, 278.25, 273.84]
+    ave: [274.33, 274.15, 275.39, 278.72, 285.39, 290.89, 292.54, 292.68, 288.68, 284.18, 280.23, 276.29]
+    max: [277.06, 276.15, 278.20, 281.73, 288.27, 293.36, 295.44, 294.90, 291.39, 286.10, 281.93, 278.80]
+  5:                                # Fountain - pond table as a proxy
+    min: [273.15, 273.15, 273.15, 275.31, 281.91, 288.62, 289.50, 290.34, 284.89, 282.12, 278.25, 273.84]
+    ave: [274.33, 274.15, 275.39, 278.72, 285.39, 290.89, 292.54, 292.68, 288.68, 284.18, 280.23, 276.29]
+    max: [277.06, 276.15, 278.20, 281.73, 288.27, 293.36, 295.44, 294.90, 291.39, 286.10, 281.93, 278.80]
 
 # --------------------------------------------------------------
 # p3d &land_surface_parameters [K]. Accepted forms:
