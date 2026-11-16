@@ -613,7 +613,12 @@ class TestShippedSeasonalTables:
             assert all(250 < x < 320 for x in v["soil"])
             assert all(0 < x < 0.6 for x in v["soil_moisture"])
             assert 260 < v["deep_soil"] < 300
-            assert set(v["p3d"]) == {"spinup_pt_mean", "spinup_pt_amplitude"}
+            assert set(v["p3d"]) == {
+                "spinup_pt_mean", "spinup_pt_amplitude",
+                "wall_inner_temperature", "roof_inner_temperature",
+                "window_inner_temperature"}
+            # heated to 21 C at least, adaptive comfort above that
+            assert 294.1 < v["p3d"]["wall_inner_temperature"] < 303
 
     def test_statistics_are_ordered(self):
         lo, mid, hi = (self._values(8, s) for s in ("min", "ave", "max"))

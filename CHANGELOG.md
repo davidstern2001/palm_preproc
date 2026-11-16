@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.2
+
+**Seasonal tables**
+
+- `wall_inner_temperature`, `roof_inner_temperature` and
+  `window_inner_temperature` follow the month instead of a fixed 300 K:
+  the 21 C heating setpoint, or the EN 16798-1 adaptive-comfort
+  temperature (0.33 x monthly mean outdoor temperature + 18.8 C) when
+  that is higher. Derived from the air-temperature climatology in
+  `seasonal.yaml`; 294.15 K in winter, about 298.6 K in an average
+  August. The setpoint and formula should be checked against the
+  standard's text.
+
 ## 1.6.1
 
 **Seasonal tables**

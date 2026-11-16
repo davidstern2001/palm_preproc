@@ -200,6 +200,19 @@ soil_moisture:
 # spin-up surface air temperature as mean +/- amplitude over the day).
 # Same Open-Meteo / ERA5 source as soil_temperature. For a heatwave case
 # `statistic: max` takes the warmest year's month.
+#
+# wall_ / roof_ / window_inner_temperature: the indoor temperature at the
+# inner side of the building envelope [K]. Not weather data - DERIVED from
+# the monthly mean air temperature above (spinup_pt_mean) with two rules:
+#   * heated season: the design setpoint, 21 C (EN 16798-1 / CSN 73 0540
+#     give 20-21 C for dwellings and offices);
+#   * otherwise the EN 16798-1 adaptive-comfort temperature of buildings
+#     without mechanical cooling, 0.33 x outdoor mean + 18.8 C,
+#   whichever is higher (the formula passes 21 C at 6.7 C outdoors).
+# The setpoint and formula are quoted from memory of the standard - check
+# them against its text. Air-conditioned buildings (about 25-26 C in
+# summer) and unheated ones are not represented; PALM's indoor_model
+# computes the interior itself and then ignores these values.
 p3d_parameters:
   spinup_pt_mean:
     min: [268.01, 270.17, 274.01, 279.41, 284.78, 288.56, 290.01, 290.60, 284.65, 280.29, 275.48, 267.97]
@@ -209,12 +222,15 @@ p3d_parameters:
     min: [2.19, 2.65, 3.33, 4.12, 3.64, 4.16, 3.75, 3.76, 3.11, 2.80, 2.29, 2.04]
     ave: [2.79, 3.58, 4.48, 5.25, 5.07, 4.94, 4.87, 4.95, 4.51, 3.90, 2.94, 2.55]
     max: [3.72, 4.78, 5.91, 6.82, 6.04, 6.29, 5.80, 5.93, 6.12, 5.12, 3.50, 3.40]
-#p3d_parameters:
-#  wall_inner_temperature:           # example: heating setpoint in winter,
-#    ave: [294.15, 294.15, 294.15, 295.15, 296.15, 298.15, 299.15, 299.15, 297.15, 295.15, 294.15, 294.15]
-#  roof_inner_temperature:
-#    ave: [294.15, 294.15, 294.15, 295.15, 296.15, 298.15, 299.15, 299.15, 297.15, 295.15, 294.15, 294.15]
-#  window_inner_temperature:
-#    ave: [294.15, 294.15, 294.15, 295.15, 296.15, 298.15, 299.15, 299.15, 297.15, 295.15, 294.15, 294.15]
-#  spinup_pt_mean:
-#    ave: [ ... 12 monthly near-surface air temperatures in K ... ]
+  wall_inner_temperature:
+    min: [294.15, 294.15, 294.15, 294.15, 295.79, 297.04, 297.51, 297.71, 295.75, 294.31, 294.15, 294.15]
+    ave: [294.15, 294.15, 294.15, 295.19, 296.77, 298.04, 298.63, 298.57, 297.05, 295.42, 294.15, 294.15]
+    max: [294.15, 294.15, 294.60, 296.50, 297.80, 299.50, 299.81, 299.74, 298.23, 296.34, 294.53, 294.15]
+  roof_inner_temperature:
+    min: [294.15, 294.15, 294.15, 294.15, 295.79, 297.04, 297.51, 297.71, 295.75, 294.31, 294.15, 294.15]
+    ave: [294.15, 294.15, 294.15, 295.19, 296.77, 298.04, 298.63, 298.57, 297.05, 295.42, 294.15, 294.15]
+    max: [294.15, 294.15, 294.60, 296.50, 297.80, 299.50, 299.81, 299.74, 298.23, 296.34, 294.53, 294.15]
+  window_inner_temperature:
+    min: [294.15, 294.15, 294.15, 294.15, 295.79, 297.04, 297.51, 297.71, 295.75, 294.31, 294.15, 294.15]
+    ave: [294.15, 294.15, 294.15, 295.19, 296.77, 298.04, 298.63, 298.57, 297.05, 295.42, 294.15, 294.15]
+    max: [294.15, 294.15, 294.60, 296.50, 297.80, 299.50, 299.81, 299.74, 298.23, 296.34, 294.53, 294.15]
