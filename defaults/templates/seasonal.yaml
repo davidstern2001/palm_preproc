@@ -211,15 +211,22 @@ soil_moisture:
 # DIFFERENCE in K) may also be listed here if desired. NOT seasonal,
 # leave alone: roughness_concrete, root_fraction, constant_roughness.
 # --------------------------------------------------------------
-# spinup_pt_mean: monthly mean 2 m air temperature [K];
-# spinup_pt_amplitude: half the mean daily range [K] (PALM drives the
-# spin-up surface air temperature as mean +/- amplitude over the day).
-# Same Open-Meteo / ERA5 source as soil_temperature. For a heatwave case
-# `statistic: max` takes the warmest year's month.
+# spinup_pt_mean / spinup_pt_amplitude: PALM sets the spin-up air
+# temperature to  mean + amplitude x cos(solar zenith angle),  so neither
+# is the daily mean or half the daily range (palmovka's 299 K / 8 K gave
+# a 300.2 K daily mean swinging +/- 5.0 K). The tables hold the pair that
+# reproduces, at 50.09 N in mid-month, the monthly mean 2 m air
+# temperature and half the mean daily range of the same Open-Meteo / ERA5
+# source as soil_temperature:
+#   amplitude = half range / (cos(lat) cos(declination))
+#   mean      = daily mean - amplitude x sin(lat) sin(declination)
+# The reanalysis has no urban heat island: central Prague runs about
+# 1-2 K warmer, mostly at night. For a heatwave case `statistic: max`
+# takes the warmest year's month; the actual day can be hotter still.
 #
 # wall_ / roof_ / window_inner_temperature: the indoor temperature at the
 # inner side of the building envelope [K]. Not weather data - DERIVED from
-# the monthly mean air temperature above (spinup_pt_mean) with two rules:
+# the monthly mean 2 m air temperature (same source) with two rules:
 #   * heated season: the design setpoint, 21 C (EN 16798-1 / CSN 73 0540
 #     give 20-21 C for dwellings and offices);
 #   * otherwise the EN 16798-1 adaptive-comfort temperature of buildings
@@ -231,13 +238,13 @@ soil_moisture:
 # computes the interior itself and then ignores these values.
 p3d_parameters:
   spinup_pt_mean:
-    min: [268.01, 270.17, 274.01, 279.41, 284.78, 288.56, 290.01, 290.60, 284.65, 280.29, 275.48, 267.97]
-    ave: [273.33, 274.95, 278.05, 282.96, 287.77, 291.61, 293.38, 293.21, 288.59, 283.68, 278.28, 274.62]
-    max: [278.00, 279.74, 281.19, 286.94, 290.87, 296.02, 296.96, 296.75, 292.17, 286.45, 280.98, 279.32]
+    min: [269.03, 270.92, 274.21, 278.59, 283.30, 286.42, 288.24, 289.50, 284.51, 280.86, 276.43, 269.02]
+    ave: [274.63, 275.96, 278.31, 281.92, 285.71, 289.07, 291.09, 291.76, 288.38, 284.47, 279.50, 275.93]
+    max: [279.73, 281.09, 281.54, 285.59, 288.41, 292.78, 294.23, 295.01, 291.89, 287.48, 282.43, 281.07]
   spinup_pt_amplitude:
-    min: [2.19, 2.65, 3.33, 4.12, 3.64, 4.16, 3.75, 3.76, 3.11, 2.80, 2.29, 2.04]
-    ave: [2.79, 3.58, 4.48, 5.25, 5.07, 4.94, 4.87, 4.95, 4.51, 3.90, 2.94, 2.55]
-    max: [3.72, 4.78, 5.91, 6.82, 6.04, 6.29, 5.80, 5.93, 6.12, 5.12, 3.50, 3.40]
+    min: [3.66, 4.24, 5.20, 6.51, 5.99, 7.06, 6.28, 6.03, 4.85, 4.43, 3.78, 3.46]
+    ave: [4.67, 5.73, 6.99, 8.29, 8.35, 8.38, 8.16, 7.94, 7.03, 6.16, 4.85, 4.33]
+    max: [6.22, 7.66, 9.22, 10.77, 9.94, 10.67, 9.72, 9.52, 9.55, 8.09, 5.77, 5.77]
   wall_inner_temperature:
     min: [294.15, 294.15, 294.15, 294.15, 295.79, 297.04, 297.51, 297.71, 295.75, 294.31, 294.15, 294.15]
     ave: [294.15, 294.15, 294.15, 295.19, 296.77, 298.04, 298.63, 298.57, 297.05, 295.42, 294.15, 294.15]

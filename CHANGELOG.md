@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.6.4
+
+**Seasonal tables**
+
+- `spinup_pt_mean` / `spinup_pt_amplitude` are converted for the formula
+  PALM uses, `mean + amplitude x cos(solar zenith)`. 1.6.1 stored the
+  monthly mean air temperature and half the daily range directly, which
+  PALM would have turned into a spin-up about 1 K too warm with only
+  ~60 % of the daily swing (checked against a run's spin-up log: 299 K /
+  8 K gave a 300.2 K daily mean, +/- 5.0 K). An average August is now
+  291.76 K / 7.94 K, reproducing 293.2 K +/- 4.95 K.
+
+**Docs**
+
+- README: "Before you submit a run" checklist.
+
 ## 1.6.3
 
 **Seasonal tables**

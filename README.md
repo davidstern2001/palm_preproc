@@ -23,6 +23,7 @@ From a single area-of-interest shapefile, `palm_preproc` builds nested child/par
   - [report — the &nesting_parameters block](#report--the-nesting_parameters-block)
 - [Command-line reference](#command-line-reference)
 - [Standalone tools](#standalone-tools)
+- [Before you submit a run](#before-you-submit-a-run)
 - [Things worth knowing](#things-worth-knowing)
 - [Authors](#authors)
 
@@ -335,6 +336,55 @@ python -m palm_preproc.steps.domains rozsah.shp domain.shp --buffer 400 --optimi
 # merge — coalesce a child-domain layer (priority inside) with a parent layer (outside)
 python -m palm_preproc.steps.merge domain_child.shp trees.shp trees_parent.shp merged.shp
 ```
+
+---
+
+## Before you submit a run
+
+Each of these caused, or nearly caused, a failed job. They take a minute;
+a failed job costs a queue cycle. Run the commands in `JOBS/<case>/INPUT/`.
+
+1. **Grid matches the static drivers.** PALM expects `nx + 1` by `ny + 1`
+   points (error PAC0333 otherwise):
+
+   ```bash
+   grep -m1 "nx = " <case>_p3d <case>_p3d_N02
+   ncdump -h <case>_static     | grep -E "^\s+(x|y) = "
+   ncdump -h <case>_static_N02 | grep -E "^\s+(x|y) = "
+   ```
+
+2. **Core counts agree in three places:** `npex x npey` in each `_p3d`,
+   the two counts in the parent's `domain_layouts`, and their sum as `-X`
+   in the submit command.
+
+   ```bash
+   grep -A1 "domain_layouts" <case>_p3d
+   grep "npex =\|npey =" <case>_p3d <case>_p3d_N02
+   ```
+
+3. **Drivers belong to this geometry.** After any change of grid size,
+   buffer or area of interest, rebuild the static and dynamic drivers from
+   the new `pgem_*` and `pmeteo_*` files. The dynamic driver's `nz` and
+   `dz` must match the `_p3d`.
+
+4. **Radiation covers the spin-up.** With `radiation_scheme = 'external'`
+   and a spin-up, the `_p3d` needs `radiation_scheme_spinup` (written by
+   default; needs a PALM build with fix 1019), or the driver's radiation
+   must start `spinup_time` before `origin_date_time`.
+
+5. **WRF path.** `file_mask` in `pmeteo_<case>.yaml` should point at
+   existing files: it is `<wrf_dir>/<wrf_date>/wrfout_d03*`.
+
+6. **A short test run first.** Use the `! DEBUG` lines in the `_p3d`
+   (`end_time = 600.0`, a shorter `spinup_time`): start-up errors then
+   show within minutes instead of after a queue cycle.
+
+7. **Restart continuation.** A run stops at `restart_time`; the following
+   parts use the `_p3dr` files and `-a "d3f restart"`. Afterwards, check
+   that the joined output reaches `end_time`.
+
+8. **No passwords in files you share.** Set `PALM_PGEM_PASSWORD` instead
+   of typing the database password into `pgem_*.yaml`.
 
 ---
 

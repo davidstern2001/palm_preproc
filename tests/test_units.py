@@ -628,6 +628,16 @@ class TestShippedSeasonalTables:
         for i in (1, 4, 5):
             assert 273.15 <= winter[i] < 280 < 288 < summer[i] < 300
 
+    def test_spinup_pair_reproduces_the_daily_cycle(self):
+        # PALM: pt = mean + amplitude * cos(zenith). The August pair must
+        # give the climatological daily mean (293.2 K) and half range
+        # (4.95 K) at Prague, not be those two numbers itself.
+        p = self._values(8, "ave")["p3d"]
+        lat, dec = math.radians(50.09), math.radians(13.5)
+        m, a = p["spinup_pt_mean"], p["spinup_pt_amplitude"]
+        assert m + a * math.sin(lat) * math.sin(dec) == pytest.approx(293.2, abs=0.2)
+        assert a * math.cos(lat) * math.cos(dec) == pytest.approx(4.95, abs=0.1)
+
     def test_statistics_are_ordered(self):
         lo, mid, hi = (self._values(8, s) for s in ("min", "ave", "max"))
         assert lo["soil"][0] <= mid["soil"][0] <= hi["soil"][0]
